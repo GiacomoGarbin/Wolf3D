@@ -1,6 +1,25 @@
+const KEY_SHIFT = 16;
+const KEY_A = 65;
+const KEY_D = 68;
+const KEY_S = 83;
+const KEY_W = 87;
+
+globals = {
+    canvas: null,
+    x: 0,
+    y: 0,
+    keys: {
+        KEY_SHIFT: false,
+        KEY_A: false,
+        KEY_D: false,
+        KEY_S: false,
+        KEY_W: false,
+    }
+}
+
 function main() {
-    const canvas = document.getElementsByTagName("canvas")[0]
-    const gl = canvas.getContext('webgl');
+    globals.canvas = document.getElementsByTagName("canvas")[0];
+    const gl = globals.canvas.getContext('webgl');
 
     if (!gl) {
         alert('Unable to initialize WebGL. Your browser or machine may not support it.');
@@ -8,6 +27,7 @@ function main() {
     }
 
     document.onkeydown = shortcuts;
+    document.onkeyup = shortcuts;
 
     // Vertex shader program
 
@@ -46,8 +66,8 @@ function main() {
 
     const buffers = initBuffers(gl);
 
-    texture = loadTexture(gl, canvas.width, canvas.height);
-    //gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    texture = loadTexture(gl, globals.canvas.width, globals.canvas.height);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
     stats = {
         element: document.getElementById("stats"),
@@ -64,8 +84,10 @@ function main() {
         // update stats
         updateStats(stats, dt);
 
+        processInput(dt)
+
         // update texture
-        texture = updateTexture(gl, texture, canvas.width, canvas.height, dt)
+        texture = updateTexture(gl, texture, globals.canvas.width, globals.canvas.height, globals.x, globals.y)
 
         drawScene(gl, programInfo, buffers, texture, dt);
         requestAnimationFrame(render);
@@ -74,27 +96,50 @@ function main() {
     requestAnimationFrame(render);
 }
 
+function processInput(dt) {
+    // double the speed by pressing SHIFT and modulate with dt
+    step = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.05;
+
+    n = 0;
+    n += (globals.keys[KEY_W] ? 1 : 0);
+    n += (globals.keys[KEY_A] ? 1 : 0);
+    n += (globals.keys[KEY_S] ? 1 : 0);
+    n += (globals.keys[KEY_D] ? 1 : 0);
+
+    // are we moving diagonally?
+    if (n == 2) {
+        // this second if it is not necessary as opposite directions cancel each other out
+        if ((globals.keys[KEY_W] != globals.keys[KEY_S]) || (globals.keys[KEY_A] != globals.keys[KEY_D])) {
+            // then modulate step, TODO: cache sqrt(2)/2
+            step *= Math.sqrt(2) / 2;
+        }
+    }
+
+    if (globals.keys[KEY_W]) {
+        globals.y = Math.max(0, globals.y - step);
+    }
+
+    if (globals.keys[KEY_A]) {
+        globals.x = Math.max(0, globals.x - step);
+    }
+
+    if (globals.keys[KEY_S]) {
+        globals.y = Math.min(globals.y + step, globals.canvas.height - 1);
+    }
+
+    if (globals.keys[KEY_D]) {
+        globals.x = Math.min(globals.x + step, globals.canvas.width - 1);
+    }
+}
+
 function updateStats(stats, dt) {
     stats.frames += 1;
     stats.elapsed += dt;
 
-    // if (stats.elapsed >= 1000.0) {
-    //     frameTime = stats.elapsed / stats.frames;
-    //     stats.element.innerText = "fps: " + stats.frames + " | " + frameTime + " ms";
-
-    //     stats.frames = 0;
-    //     stats.elapsed = 0.0;
-    // }
-
     stats.element.innerText = "fps: " + (1000 / dt).toFixed(3) + " | " + dt.toFixed(3) + " ms";
 }
 
-elapsed = 0.0;
-
-function updateTexture(gl, tex, w, h, dt) {
-    elapsed += (dt / 500);
-    b = (Math.sin(elapsed) + 1) / 2;
-
+function updateTexture(gl, tex, w, h, x, y) {
     gl.deleteTexture(tex);
 
     texture = gl.createTexture();
@@ -109,12 +154,25 @@ function updateTexture(gl, tex, w, h, dt) {
     const srcType = gl.UNSIGNED_BYTE;
     const pixel = new Uint8Array(w * h * 4);
 
+    const radius = 5;
+
     for (row = 0; row < h; ++row) {
         for (col = 0; col < w; ++col) {
             i = (row * w + col) * 4;
-            pixel[i + 0] = row / (h - 1) * 255;
-            pixel[i + 1] = col / (w - 1) * 255;
-            pixel[i + 2] = b * 255;
+
+            r = 127;
+            g = 127;
+            b = 127;
+
+            if ((Math.abs(row - y) <= radius) && (Math.abs(col - x) <= radius)) {
+                r = 255;
+                g = 0;
+                b = 0;
+            }
+
+            pixel[i + 0] = r;
+            pixel[i + 1] = g;
+            pixel[i + 2] = b;
             pixel[i + 3] = 255;
         }
     }
@@ -357,12 +415,21 @@ function drawScene(gl, programInfo, buffers, texture, dt) {
 }
 
 function shortcuts(event) {
-    var angle = 90 * (event.shiftKey ? -1 : +1);
-
-    console.log(event.keyCode);
-
+    //console.log(event.keyCode, event.type);
     switch (event.keyCode) {
-        default: return;
+        case KEY_SHIFT:
+        case KEY_A:
+        case KEY_D:
+        case KEY_S:
+        case KEY_W:
+            {
+                globals.keys[event.keyCode] = (event.type == "keydown");
+                break;
+            }
+        default:
+            {
+                break;
+            }
     }
 }
 
