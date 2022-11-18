@@ -1,4 +1,6 @@
 const KEY_SHIFT = 16;
+const KEY_LEFT = 37;
+const KEY_RIGHT = 39;
 const KEY_A = 65;
 const KEY_D = 68;
 const KEY_S = 83;
@@ -8,8 +10,11 @@ globals = {
     canvas: null,
     x: 0,
     y: 0,
+    angle: 0.0,
     keys: {
         KEY_SHIFT: false,
+        KEY_LEFT: false,
+        KEY_RIGHT: false,
         KEY_A: false,
         KEY_D: false,
         KEY_S: false,
@@ -33,7 +38,7 @@ function main() {
     attribute vec4 aVertexPosition;
     void main(void) {
       gl_Position = aVertexPosition;
-      gl_PointSize = 8.0;
+      gl_PointSize = 4.0;
     }
   `;
 
@@ -57,7 +62,7 @@ function main() {
         },
     };
 
-    buffer = initBuffer(gl);
+    buffers = initBuffers(gl);
 
     stats = {
         element: document.getElementById("stats"),
@@ -76,9 +81,9 @@ function main() {
 
         processInput(dt)
 
-        buffer = updateBuffer(gl, buffer);
+        buffers = updateBuffers(gl, buffers);
 
-        drawScene(gl, programInfo, buffer, dt);
+        drawScene(gl, programInfo, buffers, dt);
         requestAnimationFrame(render);
     }
 
@@ -86,9 +91,11 @@ function main() {
 }
 
 function shortcuts(event) {
-    //console.log(event.keyCode, event.type);
+    // console.log(event.keyCode, event.type);
     switch (event.keyCode) {
         case KEY_SHIFT:
+        case KEY_LEFT:
+        case KEY_RIGHT:
         case KEY_A:
         case KEY_D:
         case KEY_S:
@@ -138,6 +145,22 @@ function processInput(dt) {
     if (globals.keys[KEY_D]) {
         globals.x = Math.min(globals.x + step, globals.canvas.width - 1);
     }
+
+    const theta = dt * 0.005;
+
+    if (globals.keys[KEY_LEFT]) {
+        globals.angle = globals.angle - theta;
+
+        if (globals.angle < 0.0) {
+            globals.angle += 2 * Math.PI;
+        } else if (globals.angle > 2 * Math.PI) {
+            globals.angle -= 2 * Math.PI;
+        }
+    }
+
+    if (globals.keys[KEY_RIGHT]) {
+        globals.angle = globals.angle + theta;
+    }
 }
 
 function updateStats(stats, dt) {
@@ -147,86 +170,71 @@ function updateStats(stats, dt) {
     stats.element.innerText = "fps: " + (1000 / dt).toFixed(3) + " | " + dt.toFixed(3) + " ms";
 }
 
-function initBuffer(gl) {
-    const positionBuffer = gl.createBuffer();
+// expects an array of N vertices [x0, y0, x1, x1, ..., xN, yN] in screen space
+function screenSpaceToNDC(vertices) {
+    const w = globals.canvas.width;
+    const h = globals.canvas.height;
+    return vertices.map((e, i) => (i % 2 == 0) ? (e / (w / 2) - 1) : (1 - (e / (h / 2))));
+}
+
+function initBuffers(gl) {
+    const playerBuffer = gl.createBuffer();
 
     // select the buffer to apply buffer operations to from here out
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBuffer);
 
     // position in NDC
 
-    // x
-    // 0 -> -1
-    // canvas.width - 1 -> +1
+    const positions = screenSpaceToNDC([globals.x, globals.y])
 
-    // y
-    // 0 -> -1
-    // canvas.heigth - 1 -> +1
-
-    const x = (globals.x / (globals.canvas.width / 2)) - 1;
-    const y = (globals.y / (globals.canvas.height / 2)) - 1;
-
-    const positions = [x, y]
-
-    // positions = [
-    //     -1.0, -1.0,
-    //     1.0, -1.0,
-    //     1.0, 1.0,
-    //     -1.0, 1.0,
-    // ];
-
-    // positions = positions.map(x => x * 0.5);
-
-    // fill the current buffer.
+    // fill the current buffer
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
     return {
-        position: positionBuffer,
+        grid: null,
+        player: null,
+        rays: null,
     };
 }
 
-function updateBuffer(gl, buffer) {
+function updateBuffers(gl, buffers) {
 
-    gl.deleteBuffer(buffer.position);
+    // ========== player ==========
 
-    const positionBuffer = gl.createBuffer();
+    gl.deleteBuffer(buffers.player);
+    const playerBuffer = gl.createBuffer();
 
     // select the buffer to apply buffer operations to from here out
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBuffer);
 
     // position in NDC
+    const player = screenSpaceToNDC([globals.x, globals.y]);
 
-    // x
-    // 0 -> -1
-    // canvas.width - 1 -> +1
+    // fill the current buffer
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(player), gl.STATIC_DRAW);
 
-    // y
-    // 0 -> -1
-    // canvas.heigth - 1 -> +1
+    // ========== rays ==========
 
-    const x = (globals.x / (globals.canvas.width / 2)) - 1;
-    const y = 1 - (globals.y / (globals.canvas.height / 2));
+    gl.deleteBuffer(buffers.rays);
+    const raysBuffer = gl.createBuffer();
 
-    const positions = [x, y]
+    gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
-    // positions = [
-    //     -1.0, -1.0,
-    //     1.0, -1.0,
-    //     1.0, 1.0,
-    //     -1.0, 1.0,
-    // ];
+    const length = 100.0;
+    const rays = screenSpaceToNDC([
+        globals.x,
+        globals.y,
+        globals.x + length * Math.cos(globals.angle),
+        globals.y + length * Math.sin(globals.angle)]);
 
-    // positions = positions.map(x => x * 0.5);
-
-    // fill the current buffer.
-
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
     return {
-        position: positionBuffer,
+        grid: buffers.grid,
+        player: playerBuffer,
+        rays: raysBuffer,
     };
 }
 
@@ -278,9 +286,16 @@ function loadShader(gl, type, source) {
     return shader;
 }
 
-function drawScene(gl, programInfo, buffer) {
+function drawScene(gl, programInfo, buffers) {
     gl.clearColor(0.5, 0.5, 0.5, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(programInfo.program);
+
+    // draw grid
+
+
+    // draw rays
 
     {
         const numComponents = 2;
@@ -288,7 +303,7 @@ function drawScene(gl, programInfo, buffer) {
         const normalize = false;
         const stride = 0;
         const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer.position);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.rays);
         gl.vertexAttribPointer(
             programInfo.attribLocations.vertexPosition,
             numComponents,
@@ -300,7 +315,37 @@ function drawScene(gl, programInfo, buffer) {
         gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
     }
 
-    gl.useProgram(programInfo.program);
+    {
+        const color = [1.0, 0.0, 1.0, 1.0];
+        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
+    }
+
+    {
+        const mode = gl.LINES;
+        const first = 0;
+        const count = 2;
+        gl.drawArrays(mode, first, count);
+    }
+
+    // draw player
+
+    {
+        const numComponents = 2;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.player);
+        gl.vertexAttribPointer(
+            programInfo.attribLocations.vertexPosition,
+            numComponents,
+            type,
+            normalize,
+            stride,
+            offset
+        );
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    }
 
     const color = [0.0, 1.0, 0.0, 1.0];
     gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
