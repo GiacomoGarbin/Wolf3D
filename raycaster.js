@@ -33,7 +33,7 @@ function main() {
     attribute vec4 aVertexPosition;
     void main(void) {
       gl_Position = aVertexPosition;
-      gl_PointSize = 10.0;
+      gl_PointSize = 8.0;
     }
   `;
 
@@ -57,7 +57,7 @@ function main() {
         },
     };
 
-    const buffers = initBuffers(gl);
+    buffer = initBuffer(gl);
 
     stats = {
         element: document.getElementById("stats"),
@@ -76,7 +76,9 @@ function main() {
 
         processInput(dt)
 
-        drawScene(gl, programInfo, buffers, dt);
+        buffer = updateBuffer(gl, buffer);
+
+        drawScene(gl, programInfo, buffer, dt);
         requestAnimationFrame(render);
     }
 
@@ -145,23 +147,79 @@ function updateStats(stats, dt) {
     stats.element.innerText = "fps: " + (1000 / dt).toFixed(3) + " | " + dt.toFixed(3) + " ms";
 }
 
-function initBuffers(gl) {
+function initBuffer(gl) {
     const positionBuffer = gl.createBuffer();
 
     // select the buffer to apply buffer operations to from here out
 
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
-    // points position in NDC
+    // position in NDC
 
-    const positions1 = [
-        -1.0, -1.0, 1.0,
-        1.0, -1.0, 1.0,
-        1.0, 1.0, 1.0,
-        -1.0, 1.0, 1.0,
-    ];
+    // x
+    // 0 -> -1
+    // canvas.width - 1 -> +1
 
-    const positions = positions1.map(x => x * 0.5);
+    // y
+    // 0 -> -1
+    // canvas.heigth - 1 -> +1
+
+    const x = (globals.x / (globals.canvas.width / 2)) - 1;
+    const y = (globals.y / (globals.canvas.height / 2)) - 1;
+
+    const positions = [x, y]
+
+    // positions = [
+    //     -1.0, -1.0,
+    //     1.0, -1.0,
+    //     1.0, 1.0,
+    //     -1.0, 1.0,
+    // ];
+
+    // positions = positions.map(x => x * 0.5);
+
+    // fill the current buffer.
+
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    return {
+        position: positionBuffer,
+    };
+}
+
+function updateBuffer(gl, buffer) {
+
+    gl.deleteBuffer(buffer.position);
+
+    const positionBuffer = gl.createBuffer();
+
+    // select the buffer to apply buffer operations to from here out
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+    // position in NDC
+
+    // x
+    // 0 -> -1
+    // canvas.width - 1 -> +1
+
+    // y
+    // 0 -> -1
+    // canvas.heigth - 1 -> +1
+
+    const x = (globals.x / (globals.canvas.width / 2)) - 1;
+    const y = 1 - (globals.y / (globals.canvas.height / 2));
+
+    const positions = [x, y]
+
+    // positions = [
+    //     -1.0, -1.0,
+    //     1.0, -1.0,
+    //     1.0, 1.0,
+    //     -1.0, 1.0,
+    // ];
+
+    // positions = positions.map(x => x * 0.5);
 
     // fill the current buffer.
 
@@ -220,17 +278,17 @@ function loadShader(gl, type, source) {
     return shader;
 }
 
-function drawScene(gl, programInfo, buffers) {
+function drawScene(gl, programInfo, buffer) {
     gl.clearColor(0.5, 0.5, 0.5, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     {
-        const numComponents = 3;
+        const numComponents = 2;
         const type = gl.FLOAT;
         const normalize = false;
         const stride = 0;
         const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer.position);
         gl.vertexAttribPointer(
             programInfo.attribLocations.vertexPosition,
             numComponents,
@@ -250,7 +308,7 @@ function drawScene(gl, programInfo, buffers) {
     {
         const mode = gl.POINTS;
         const first = 0;
-        const count = 4;
+        const count = 1;
         gl.drawArrays(mode, first, count);
     }
 }
