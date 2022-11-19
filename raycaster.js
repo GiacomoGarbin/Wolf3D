@@ -195,7 +195,7 @@ function processInput(dt) {
     // clamp angle
     if (globals.angle < 0.0) {
         globals.angle += 2 * Math.PI;
-    } else if (globals.angle > 2 * Math.PI) {
+    } else if (globals.angle >= 2 * Math.PI) {
         globals.angle -= 2 * Math.PI;
     }
 
@@ -300,6 +300,10 @@ function initBuffers(gl) {
     };
 }
 
+function intersect(r, p, d) {
+    return Math.abs((r - p) / d);
+}
+
 function updateBuffers(gl, buffers) {
 
     // ========== player ==========
@@ -318,17 +322,69 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
+    // find first cell intersection
+
+    const size = 64;
+
+    const px = globals.x;
+    const py = globals.y;
+    const dx = Math.cos(globals.angle);
+    const dy = Math.sin(globals.angle);
+
+    // cell
+    const cx = Math.floor(px / size) * size;
+    const cy = Math.floor(py / size) * size;
+
+    const r = cx + size   //right
+    const u = cy          // up
+    const l = cx          // left
+    const d = cy + size   // down
+
+    const half = Math.PI / 2;
+
+    let t0 = 0.0;
+    let t1 = 0.0;
+
+    console.log(px, py, dx, dy, r, u, l, d, globals.angle);
+
+    if (((3 * half) <= globals.angle) && (globals.angle < (2 * Math.PI))) {
+        // test right and up
+        const rx = r;
+        const ry = u;
+        t0 = intersect(rx, px, dx);
+        t1 = intersect(ry, py, dy);
+    } else if ((Math.PI <= globals.angle) && (globals.angle < (3 * half))) {
+        // test up and left
+        const rx = l;
+        const ry = u;
+        t0 = intersect(rx, px, dx);
+        t1 = intersect(ry, py, dy);
+    } else if ((half <= globals.angle) && (globals.angle < (Math.PI))) {
+        // test left and down
+        const rx = l;
+        const ry = d;
+        t0 = intersect(rx, px, dx);
+        t1 = intersect(ry, py, dy);
+    } else {
+        // test down and right
+        const rx = r;
+        const ry = d;
+        t0 = intersect(rx, px, dx);
+        t1 = intersect(ry, py, dy);
+    }
+
+    const t = Math.min(t0, t1);
+
     gl.deleteBuffer(buffers.rays.buffer);
     const raysBuffer = gl.createBuffer();
 
     gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
-    const length = 20.0;
     const rays = screenSpaceToNDC([
-        globals.x,
-        globals.y,
-        globals.x + length * Math.cos(globals.angle),
-        globals.y + length * Math.sin(globals.angle)]);
+        px,
+        py,
+        px + t * dx,
+        py + t * dy]);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
