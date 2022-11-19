@@ -111,56 +111,88 @@ function shortcuts(event) {
     }
 }
 
+function dot(a, b) {
+    console.assert(a.length == b.length);
+    return a.map((e, i) => a[i] * b[i]).reduce((t, v) => t + v, 0);
+}
+
+function translate(vertex, offset) {
+    console.assert(vertex.length == offset.length);
+    return vertex.map((e, i) => vertex[i] + offset[i]);
+}
+
+function rotate(vertex, angle) {
+    const row0 = [Math.cos(angle), -Math.sin(angle)];
+    const row1 = [Math.sin(angle), Math.cos(angle)];
+    return [dot(row0, vertex), dot(row1, vertex)]
+}
+
 function processInput(dt) {
     // double the speed by pressing SHIFT and modulate with dt
     step = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.05;
 
     n = 0;
     n += (globals.keys[KEY_W] ? 1 : 0);
-    n += (globals.keys[KEY_A] ? 1 : 0);
-    n += (globals.keys[KEY_S] ? 1 : 0);
+    n += (globals.keys[KEY_LEFT] ? 1 : 0);
+    n += (globals.keys[KEY_RIGHT] ? 1 : 0);
     n += (globals.keys[KEY_D] ? 1 : 0);
 
     // are we moving diagonally?
     if (n == 2) {
         // this second if it is not necessary as opposite directions cancel each other out
-        if ((globals.keys[KEY_W] != globals.keys[KEY_S]) || (globals.keys[KEY_A] != globals.keys[KEY_D])) {
+        if ((globals.keys[KEY_W] != globals.keys[KEY_S]) || (globals.keys[KEY_LEFT] != globals.keys[KEY_RIGHT])) {
             // then modulate step, TODO: cache sqrt(2)/2
             step *= Math.sqrt(2) / 2;
         }
     }
 
+    [dx, dy] = [globals.x, globals.y];
+
+    // screen space -> player space
+    [globals.x, globals.y] = translate([globals.x, globals.y], [-dx, -dy]);
+    [globals.x, globals.y] = rotate([globals.x, globals.y], -globals.angle);
+
     if (globals.keys[KEY_W]) {
-        globals.y = Math.max(0, globals.y - step);
+        globals.x = globals.x + step;
     }
 
-    if (globals.keys[KEY_A]) {
-        globals.x = Math.max(0, globals.x - step);
+    if (globals.keys[KEY_LEFT]) {
+        globals.y = globals.y - step;
     }
 
     if (globals.keys[KEY_S]) {
-        globals.y = Math.min(globals.y + step, globals.canvas.height - 1);
+        globals.x = globals.x - step;
     }
 
-    if (globals.keys[KEY_D]) {
-        globals.x = Math.min(globals.x + step, globals.canvas.width - 1);
+    if (globals.keys[KEY_RIGHT]) {
+        globals.y = globals.y + step;
     }
 
     const theta = dt * 0.005;
 
-    if (globals.keys[KEY_LEFT]) {
+    if (globals.keys[KEY_A]) {
         globals.angle = globals.angle - theta;
-
-        if (globals.angle < 0.0) {
-            globals.angle += 2 * Math.PI;
-        } else if (globals.angle > 2 * Math.PI) {
-            globals.angle -= 2 * Math.PI;
-        }
     }
 
-    if (globals.keys[KEY_RIGHT]) {
+    if (globals.keys[KEY_D]) {
         globals.angle = globals.angle + theta;
     }
+
+    if (globals.angle < 0.0) {
+        globals.angle += 2 * Math.PI;
+    } else if (globals.angle > 2 * Math.PI) {
+        globals.angle -= 2 * Math.PI;
+    }
+
+    // player space -> screen space
+    [globals.x, globals.y] = rotate([globals.x, globals.y], globals.angle);
+    [globals.x, globals.y] = translate([globals.x, globals.y], [dx, dy]);
+
+    globals.x = Math.max(0, globals.x);
+    globals.x = Math.min(globals.x, globals.canvas.height - 1);
+
+    globals.y = Math.max(0, globals.y);
+    globals.y = Math.min(globals.y, globals.canvas.width - 1);
 }
 
 function updateStats(stats, dt) {
