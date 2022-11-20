@@ -6,6 +6,8 @@ const KEY_D = 68;
 const KEY_S = 83;
 const KEY_W = 87;
 
+const HalfPI = Math.PI / 2;
+
 globals = {
     canvas: null,
     x: 0,       // player position x
@@ -183,8 +185,8 @@ function processInput(dt) {
         globals.y = globals.y + step;
     }
 
-    // modulate with dt
-    const theta = dt * 0.005;
+    // double the speed by pressing SHIFT and modulate with dt
+    const theta = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.0025;
 
     // rotate left
     if (globals.keys[KEY_A]) {
@@ -309,6 +311,7 @@ function intersect(r, p, d) {
     return Math.abs((r - p) / d);
 }
 
+// debug
 let ppx = 0.0;
 let ppy = 0.0;
 
@@ -319,18 +322,22 @@ function getCell(px, py) {
     const cy = Math.floor(py / globals.size);
     console.assert((0 <= cx < globals.cols) && (0 <= cy < globals.rows));
 
+    // debug
     if (ppx != px || ppy != py) {
         ppx = px;
         ppy = py;
 
-        console.log("===== getCell =====");
-        console.log(globals.x, globals.y);
-        console.log(px, py);
-        console.log(cx, cy);
-        console.log("===== ======= =====");
+        // console.log("===== getCell =====");
+        // console.log(globals.x, globals.y);
+        // console.log(px, py);
+        // console.log(cx, cy);
+        // console.log(cy * globals.cols + cx, cx * globals.cols + cy);
+        // console.log(globals.grid);
+        // console.log(globals.grid[cy * globals.cols + cx]);
+        // console.log("===== ======= =====");
     }
 
-    const i = cx * globals.cols + cy;
+    const i = cy * globals.cols + cx;
     return globals.grid[i];
 }
 
@@ -340,6 +347,119 @@ function isWall(px, py) {
 
 function inGrid(px, py) {
     return ((0.0 <= px) && (px < globals.canvas.width)) && ((0.0 <= py) && (py < globals.canvas.height));
+}
+
+function findAxisIntersection(r, p, d, vs, hs) {
+    const theta = globals.angle;
+
+    let dx = Math.cos(theta);
+    let dy = Math.sin(theta);
+
+    // find first axis intersection
+    const t = intersect(r, p, d);
+    let px = globals.x + t * dx;
+    let py = globals.y + t * dy;
+
+    if (!inGrid(px, py)) {
+        return null;
+    } else if (isWall(px, py)) {
+        return [px, py];
+    }
+
+    // // steps
+    // dx = Math.tan(HalfPI - theta);
+    // dy = Math.tan(theta);
+    // const sign = side ? -1 : +1;
+    // const vstep = dy * sign * globals.size;
+    // const hstep = sign * globals.size;
+    // // const vstep = sign * globals.size;
+    // // const hstep = dx * sign * globals.size;
+
+    // find first wall intersection
+    while (true) {
+        px = px + hs;
+        py = py + vs;
+
+        if (!inGrid(px, py)) {
+            return null;
+        } else if (isWall(px, py)) {
+            return [px, py];
+        }
+    }
+}
+
+function findVerticalIntersection(theta) {
+    const a1 = 3 * HalfPI;
+    const a3 = HalfPI;
+
+    if ((theta == a1) || (theta == a3)) {
+        return null;
+    }
+
+    const side = ((a3 < theta) && (theta < a1));
+
+    // player position
+    const px = globals.x;
+
+    // player direction
+    let dx = Math.cos(theta);
+
+    // player cell
+    const cx = Math.floor(px / globals.size) * globals.size;
+
+    // neighboring cells
+    const r = cx + globals.size // right
+    const l = cx - 1            // left
+
+    // ray point
+    const rx = side ? l : r;
+
+    // vertical and horizontal steps
+    const sign = side ? -1 : +1;
+    const vs = sign * globals.size * Math.tan(theta);
+    const hs = sign * globals.size;
+
+    return findAxisIntersection(rx, px, dx, vs, hs);
+}
+
+function findHorizontalIntersection(theta) {
+    const a0 = 0.0;
+    const a2 = Math.PI;
+
+    if ((theta == a0) || (theta == a2)) {
+        return null;
+    }
+
+    const side = ((a0 < theta) && (theta < a2));
+
+    // player position
+    const py = globals.y;
+
+    // player direction
+    let dy = Math.sin(theta);
+
+    // player cell
+    const cy = Math.floor(py / globals.size) * globals.size;
+
+    // neighboring cells
+    const u = cy - 1            // up
+    const d = cy + globals.size // down
+
+    // ray point
+    const ry = side ? d : u;
+
+    // vertical and horizontal steps
+    const sign = side ? +1 : -1;
+    const vs = sign * globals.size;
+    const hs = sign * globals.size * Math.tan(HalfPI - theta);
+
+    return findAxisIntersection(ry, py, dy, vs, hs);
+}
+
+function distance(px, py) {
+    const x = globals.x - px;
+    const y = globals.y - py;
+    return Math.sqrt(x * x + y * y);
 }
 
 function updateBuffers(gl, buffers) {
@@ -359,13 +479,6 @@ function updateBuffers(gl, buffers) {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(player), gl.STATIC_DRAW);
 
     // ========== rays ==========
-
-    const half = Math.PI / 2;
-
-    const a0 = 2 * Math.PI;
-    const a1 = 3 * half;
-    const a2 = Math.PI;
-    const a3 = half;
 
     const theta = globals.angle;
 
@@ -387,6 +500,11 @@ function updateBuffers(gl, buffers) {
     let ry = 0.0;
 
     // console.log(px, py, dx, dy, r, u, l, d, globals.angle);
+
+    const a0 = 2 * Math.PI;
+    const a1 = 3 * HalfPI;
+    const a2 = Math.PI;
+    const a3 = HalfPI;
 
     if ((a1 <= theta) && (theta < a0)) {
         // test right and up
@@ -424,124 +542,31 @@ function updateBuffers(gl, buffers) {
 
     let points = [];
 
-
-
     // vertical
+    {
+        const point = findVerticalIntersection(theta);
 
-    if ((theta != a1) && (theta != a3)) {
-        // find first intersection
-        const t = intersect(rx, globals.x, dx);
-        let px = globals.x + t * dx;
-        let py = globals.y + t * dy;
-
-        let count = 0;
-
-        if (inGrid(px, py)) {
-            // debug
-            points.push(px, py);
-            count++;
-            if (isWall(px, py)) {
-                console.log("point " + (count - 1) + " is wall!");
-            }
-
-            // step
-            dx = Math.tan(half - theta);
-            dy = Math.tan(theta);
-            const sign = ((a3 < theta) && (theta < a1)) ? -1 : +1;
-
-            const vstep = dy * sign * globals.size;
-            const hstep = sign * globals.size;
-
-            let found = false;
-
-            // find all following intersections
-            while (!found) {
-
-                px = px + hstep;
-                py = py + vstep;
-
-                found = !inGrid(px, py);
-
-                if (!found) {
-                    // debug
-                    points.push(px, py);
-                    count++;
-                    if (isWall(px, py)) {
-                        console.log("point " + (count - 1) + " is wall!");
-                    }
-                }
-            }
+        if (point != null) {
+            points = points.concat(point);
         }
     }
 
-    if ((theta != 0.0) && (theta != a2)) {
-        // find all horizontal intersections
+    // horizontal
+    {
+        const point = findHorizontalIntersection(theta);
+
+        if (point != null) {
+            points = points.concat(point);
+        }
     }
 
-    const t0 = (globals.angle == (2 * Math.PI - half)) ? null : intersect(rx, px, dx);
-    const t1 = (dy == 0) ? null : intersect(ry, py, dy);
-    // const t = Math.min(t0, t1);
+    if (points.length == 4) {
+        // TODO: we can use the distance square here
+        const d0 = distance(points[0], points[1]);
+        const d1 = distance(points[2], points[3]);
 
-
-    if (t0 != null) {
-        // points.push(px + t0 * dx, py + t0 * dy);
+        points = points.splice((d0 < d1) ? 0 : 2, 2);
     }
-
-    if (t1 != null) {
-        // points.push(px + t1 * dx, py + t1 * dy);
-    }
-
-    // px = px + t * dx;
-    // py = py + t * dy;
-
-    // let vx = px + t0 * dx;
-    // let vy = py + t0 * dy;
-
-    // let hx = px + t1 * dx;
-    // let hy = py + t1 * dy;
-
-    let found = false;
-
-    // switch (getCell(px, py)) {
-    //     case 0: // empty
-    //         break;
-    //     case 1: // wall
-    //         found = true;
-    //         break;
-    // }
-
-    let v = false;
-    let h = false;
-
-    dx = Math.tan(half - globals.angle);
-    dy = Math.tan(globals.angle);
-
-    // let t = 0.0;
-
-    const sign = (half < globals.angle) && (globals.angle < (3 * half)) ? -1 : +1;
-
-    if (t0 != null) {
-        // points.push(points[0] + sign * globals.size, points[1] + dy * sign * globals.size);
-    }
-
-    console.log(points);
-
-    // while (!found) {
-
-    //     v = isWall(vx, vy); // or out of grid
-    //     h = isWall(hx, hy); // or out of grid
-
-    //     if (v && h) {
-    //         found = true;
-    //         t = Math.min(t0, t1);
-    //     }
-
-    //     if (!v) {
-
-    //     }
-
-    //     found = true;
-    // }
 
     gl.deleteBuffer(buffers.rays.buffer);
     const raysBuffer = gl.createBuffer();
@@ -552,8 +577,8 @@ function updateBuffers(gl, buffers) {
     const rays = screenSpaceToNDC([
         globals.x,
         globals.y,
-        globals.x + length * Math.cos(globals.angle),
-        globals.y + length * Math.sin(globals.angle),]);
+        (points.length == 2) ? points[0] : (globals.x + length * Math.cos(globals.angle)),
+        (points.length == 2) ? points[1] : (globals.y + length * Math.sin(globals.angle)),]);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
