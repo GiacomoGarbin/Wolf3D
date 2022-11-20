@@ -9,7 +9,10 @@ const KEY_W = 87;
 const HalfPI = Math.PI / 2;
 
 globals = {
-    canvas: null,
+    canvas2d: null, // top-down debug view
+    canvas3d: null,
+    w: 0, // canvas width
+    h: 0, // canvas height
     x: 0,       // player position x
     y: 0,       // player position y
     angle: 0.0, // player direction
@@ -29,13 +32,24 @@ globals = {
 }
 
 function main() {
-    globals.canvas = document.getElementsByTagName("canvas")[0];
-    const gl = globals.canvas.getContext('webgl');
+    globals.canvas2d = document.getElementById("2d");
+    const gl2d = globals.canvas2d.getContext('webgl');
 
-    if (!gl) {
+    if (!gl2d) {
         alert('Unable to initialize WebGL. Your browser or machine may not support it.');
         return;
     }
+
+    globals.canvas3d = document.getElementById("3d");
+    const gl3d = globals.canvas3d.getContext('webgl');
+
+    if (!gl3d) {
+        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
+        return;
+    }
+
+    globals.w = globals.canvas3d.width;
+    globals.h = globals.canvas3d.height;
 
     document.onkeydown = shortcuts;
     document.onkeyup = shortcuts;
@@ -58,20 +72,20 @@ function main() {
     }
   `;
 
-    const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+    const shaderProgram = initShaderProgram(gl2d, vsSource, fsSource);
     const programInfo = {
         program: shaderProgram,
         attribLocations: {
-            vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-            textureCoord: gl.getAttribLocation(shaderProgram, "aTextureCoord"),
+            vertexPosition: gl2d.getAttribLocation(shaderProgram, "aVertexPosition"),
+            textureCoord: gl2d.getAttribLocation(shaderProgram, "aTextureCoord"),
         },
         uniformLocations: {
-            uFragColor: gl.getUniformLocation(shaderProgram, "uFragColor"),
-            uPointSize: gl.getUniformLocation(shaderProgram, "uPointSize"),
+            uFragColor: gl2d.getUniformLocation(shaderProgram, "uFragColor"),
+            uPointSize: gl2d.getUniformLocation(shaderProgram, "uPointSize"),
         },
     };
 
-    buffers = initBuffers(gl);
+    buffers = initBuffers(gl2d);
 
     stats = {
         element: document.getElementById("stats"),
@@ -81,8 +95,8 @@ function main() {
 
     prevTime = 0.0
 
-    globals.x = globals.canvas.width / 2;
-    globals.y = globals.canvas.height / 2;
+    globals.x = globals.w / 2;
+    globals.y = globals.h / 2;
     globals.angle = -Math.PI / 2;
 
     function render(currTime) {
@@ -94,9 +108,13 @@ function main() {
 
         processInput(dt)
 
-        buffers = updateBuffers(gl, buffers);
+        buffers = updateBuffers(gl2d, buffers);
 
-        drawScene(gl, programInfo, buffers, dt);
+        // debug top-down view
+        draw2dScene(gl2d, programInfo, buffers);
+
+        draw3dScene(gl3d);
+
         requestAnimationFrame(render);
     }
 
@@ -203,9 +221,9 @@ function processInput(dt) {
 
     // clamp position
     globals.x = Math.max(0, globals.x);
-    globals.x = Math.min(globals.x, globals.canvas.height - 1);
+    globals.x = Math.min(globals.x, globals.h - 1);
     globals.y = Math.max(0, globals.y);
-    globals.y = Math.min(globals.y, globals.canvas.width - 1);
+    globals.y = Math.min(globals.y, globals.w - 1);
 
     // double the speed by pressing SHIFT and modulate with dt
     const theta = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.0025;
@@ -237,8 +255,8 @@ function updateStats(stats, dt) {
 
 // expects an array of N vertices [x0, y0, x1, x1, ..., xN, yN] in screen space
 function screenSpaceToNDC(vertices) {
-    const w = globals.canvas.width;
-    const h = globals.canvas.height;
+    const w = globals.w;
+    const h = globals.h;
     return vertices.map((e, i) => (i % 2 == 0) ? (e / (w / 2) - 1) : (1 - (e / (h / 2))));
 }
 
@@ -324,7 +342,7 @@ function intersect(r, p, d) {
 }
 
 function getCell(px, py) {
-    console.assert((0 <= px < globals.canvas.width) && (0 <= py < globals.canvas.height));
+    console.assert((0 <= px < globals.w) && (0 <= py < globals.h));
 
     const cx = Math.floor(px / globals.size);
     const cy = Math.floor(py / globals.size);
@@ -339,7 +357,7 @@ function isWall(px, py) {
 }
 
 function inGrid(px, py) {
-    return ((0.0 <= px) && (px < globals.canvas.width)) && ((0.0 <= py) && (py < globals.canvas.height));
+    return ((0.0 <= px) && (px < globals.w)) && ((0.0 <= py) && (py < globals.h));
 }
 
 function findAxisIntersection(theta, r, p, d, vs, hs) {
@@ -593,7 +611,12 @@ function loadShader(gl, type, source) {
     return shader;
 }
 
-function drawScene(gl, programInfo, buffers) {
+function draw3dScene(gl) {
+    gl.clearColor(0.2, 0.2, 0.2, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+}
+
+function draw2dScene(gl, programInfo, buffers) {
     gl.clearColor(0.2, 0.2, 0.2, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
