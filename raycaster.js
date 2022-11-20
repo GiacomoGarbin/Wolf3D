@@ -162,28 +162,50 @@ function processInput(dt) {
     [dx, dy] = [globals.x, globals.y];
 
     // screen space -> player space
-    [globals.x, globals.y] = translate([globals.x, globals.y], [-dx, -dy]);
-    [globals.x, globals.y] = rotate([globals.x, globals.y], -globals.angle);
+    [px, py] = translate([globals.x, globals.y], [-dx, -dy]);
+    [px, py] = rotate([px, py], -globals.angle);
 
     // move forward
     if (globals.keys[KEY_W]) {
-        globals.x = globals.x + step;
+        px = px + step;
     }
 
     // strafe left
     if (globals.keys[KEY_LEFT]) {
-        globals.y = globals.y - step;
+        py = py - step;
     }
 
     // move backward
     if (globals.keys[KEY_S]) {
-        globals.x = globals.x - step;
+        px = px - step;
     }
 
     // strafe right
     if (globals.keys[KEY_RIGHT]) {
-        globals.y = globals.y + step;
+        py = py + step;
     }
+
+    // player space -> screen space
+    [px, py] = rotate([px, py], globals.angle);
+    [px, py] = translate([px, py], [dx, dy]);
+
+    // check wall collision
+    if (!isWall(px, globals.y)) {
+        // apply translation
+        globals.x = px;
+    }
+
+    // check wall collision
+    if (!isWall(globals.x, py)) {
+        // apply translation
+        globals.y = py;
+    }
+
+    // clamp position
+    globals.x = Math.max(0, globals.x);
+    globals.x = Math.min(globals.x, globals.canvas.height - 1);
+    globals.y = Math.max(0, globals.y);
+    globals.y = Math.min(globals.y, globals.canvas.width - 1);
 
     // double the speed by pressing SHIFT and modulate with dt
     const theta = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.0025;
@@ -204,16 +226,6 @@ function processInput(dt) {
     } else if (globals.angle >= 2 * Math.PI) {
         globals.angle -= 2 * Math.PI;
     }
-
-    // player space -> screen space
-    [globals.x, globals.y] = rotate([globals.x, globals.y], globals.angle);
-    [globals.x, globals.y] = translate([globals.x, globals.y], [dx, dy]);
-
-    // clamp position
-    globals.x = Math.max(0, globals.x);
-    globals.x = Math.min(globals.x, globals.canvas.height - 1);
-    globals.y = Math.max(0, globals.y);
-    globals.y = Math.min(globals.y, globals.canvas.width - 1);
 }
 
 function updateStats(stats, dt) {
@@ -311,31 +323,12 @@ function intersect(r, p, d) {
     return Math.abs((r - p) / d);
 }
 
-// debug
-let ppx = 0.0;
-let ppy = 0.0;
-
 function getCell(px, py) {
     console.assert((0 <= px < globals.canvas.width) && (0 <= py < globals.canvas.height));
 
     const cx = Math.floor(px / globals.size);
     const cy = Math.floor(py / globals.size);
     console.assert((0 <= cx < globals.cols) && (0 <= cy < globals.rows));
-
-    // debug
-    if (ppx != px || ppy != py) {
-        ppx = px;
-        ppy = py;
-
-        // console.log("===== getCell =====");
-        // console.log(globals.x, globals.y);
-        // console.log(px, py);
-        // console.log(cx, cy);
-        // console.log(cy * globals.cols + cx, cx * globals.cols + cy);
-        // console.log(globals.grid);
-        // console.log(globals.grid[cy * globals.cols + cx]);
-        // console.log("===== ======= =====");
-    }
 
     const i = cy * globals.cols + cx;
     return globals.grid[i];
@@ -363,15 +356,6 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
     } else if (isWall(px, py)) {
         return [px, py];
     }
-
-    // // steps
-    // dx = Math.tan(HalfPI - theta);
-    // dy = Math.tan(theta);
-    // const sign = side ? -1 : +1;
-    // const vstep = dy * sign * globals.size;
-    // const hstep = sign * globals.size;
-    // // const vstep = sign * globals.size;
-    // // const hstep = dx * sign * globals.size;
 
     // find first wall intersection
     while (true) {
@@ -478,71 +462,11 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
-    // const theta = globals.angle;
-
-    let px = globals.x;
-    let py = globals.y;
-    let dx = Math.cos(globals.angle);
-    let dy = Math.sin(globals.angle);
-
-    // cell
-    const cx = Math.floor(px / globals.size) * globals.size;
-    const cy = Math.floor(py / globals.size) * globals.size;
-
-    const r = cx + globals.size // right
-    const u = cy - 1            // up
-    const l = cx - 1            // left
-    const d = cy + globals.size // down
-
-    let rx = 0.0;
-    let ry = 0.0;
-
-    // console.log(px, py, dx, dy, r, u, l, d, globals.angle);
-
-    const a0 = 2 * Math.PI;
-    const a1 = 3 * HalfPI;
-    const a2 = Math.PI;
-    const a3 = HalfPI;
-
-    // if ((a1 <= theta) && (theta < a0)) {
-    //     // test right and up
-    //     //    ^
-    //     //    | /
-    //     // ---+--->
-    //     //    |  
-    //     rx = r;
-    //     ry = u;
-    // } else if ((a2 <= theta) && (theta < a1)) {
-    //     // test up and left
-    //     //    ^
-    //     //  \ |  
-    //     // ---+--->
-    //     //    |  
-    //     rx = l;
-    //     ry = u;
-    // } else if ((a3 <= theta) && (theta < a2)) {
-    //     // test left and down
-    //     //    ^
-    //     //    |  
-    //     // ---+--->
-    //     //  / |  
-    //     rx = l;
-    //     ry = d;
-    // } else {
-    //     // test down and right
-    //     //    ^
-    //     //    |  
-    //     // ---+--->
-    //     //    | \
-    //     rx = r;
-    //     ry = d;
-    // }
-
     const fov = HalfPI; // field of view
-    const count = 30;    // number of rays
+    const count = 60;   // number of rays
 
     let rays = [];
-    let points = [];
+    let points = []; // debug
 
     let a = globals.angle;
     let b = globals.angle;
@@ -565,16 +489,6 @@ function updateBuffers(gl, buffers) {
             theta -= 2 * Math.PI;
         }
 
-
-        // [globals.x, globals.y] = rotate([globals.x, globals.y], globals.angle);
-        // [globals.x, globals.y] = translate([globals.x, globals.y], [dx, dy]);
-
-        // console.log("a = " + a);
-        // console.log("b = " + b);
-        // console.log("i = " + inc);
-        // console.log("angle = " + angle);
-        // console.log("theta = " + theta);
-
         const pv = findVerticalIntersection(theta);
         const ph = findHorizontalIntersection(theta);
 
@@ -595,11 +509,11 @@ function updateBuffers(gl, buffers) {
         if (p != null) {
             rays.push(globals.x, globals.y, ...p);
             // debug
-            points = points.concat(p);
+            points.push(...p);
         } else {
             // ray to infinity
         }
-    } // for each theta
+    } // for each angle
 
     gl.deleteBuffer(buffers.rays.buffer);
     const raysBuffer = gl.createBuffer();
