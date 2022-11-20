@@ -349,9 +349,7 @@ function inGrid(px, py) {
     return ((0.0 <= px) && (px < globals.canvas.width)) && ((0.0 <= py) && (py < globals.canvas.height));
 }
 
-function findAxisIntersection(r, p, d, vs, hs) {
-    const theta = globals.angle;
-
+function findAxisIntersection(theta, r, p, d, vs, hs) {
     let dx = Math.cos(theta);
     let dy = Math.sin(theta);
 
@@ -419,7 +417,7 @@ function findVerticalIntersection(theta) {
     const vs = sign * globals.size * Math.tan(theta);
     const hs = sign * globals.size;
 
-    return findAxisIntersection(rx, px, dx, vs, hs);
+    return findAxisIntersection(theta, rx, px, dx, vs, hs);
 }
 
 function findHorizontalIntersection(theta) {
@@ -453,7 +451,7 @@ function findHorizontalIntersection(theta) {
     const vs = sign * globals.size;
     const hs = sign * globals.size * Math.tan(HalfPI - theta);
 
-    return findAxisIntersection(ry, py, dy, vs, hs);
+    return findAxisIntersection(theta, ry, py, dy, vs, hs);
 }
 
 function distance(px, py) {
@@ -480,7 +478,7 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
-    const theta = globals.angle;
+    // const theta = globals.angle;
 
     let px = globals.x;
     let py = globals.y;
@@ -506,79 +504,109 @@ function updateBuffers(gl, buffers) {
     const a2 = Math.PI;
     const a3 = HalfPI;
 
-    if ((a1 <= theta) && (theta < a0)) {
-        // test right and up
-        //    ^
-        //    | /
-        // ---+--->
-        //    |  
-        rx = r;
-        ry = u;
-    } else if ((a2 <= theta) && (theta < a1)) {
-        // test up and left
-        //    ^
-        //  \ |  
-        // ---+--->
-        //    |  
-        rx = l;
-        ry = u;
-    } else if ((a3 <= theta) && (theta < a2)) {
-        // test left and down
-        //    ^
-        //    |  
-        // ---+--->
-        //  / |  
-        rx = l;
-        ry = d;
-    } else {
-        // test down and right
-        //    ^
-        //    |  
-        // ---+--->
-        //    | \
-        rx = r;
-        ry = d;
-    }
+    // if ((a1 <= theta) && (theta < a0)) {
+    //     // test right and up
+    //     //    ^
+    //     //    | /
+    //     // ---+--->
+    //     //    |  
+    //     rx = r;
+    //     ry = u;
+    // } else if ((a2 <= theta) && (theta < a1)) {
+    //     // test up and left
+    //     //    ^
+    //     //  \ |  
+    //     // ---+--->
+    //     //    |  
+    //     rx = l;
+    //     ry = u;
+    // } else if ((a3 <= theta) && (theta < a2)) {
+    //     // test left and down
+    //     //    ^
+    //     //    |  
+    //     // ---+--->
+    //     //  / |  
+    //     rx = l;
+    //     ry = d;
+    // } else {
+    //     // test down and right
+    //     //    ^
+    //     //    |  
+    //     // ---+--->
+    //     //    | \
+    //     rx = r;
+    //     ry = d;
+    // }
 
+    const fov = HalfPI; // field of view
+    const count = 30;    // number of rays
+
+    let rays = [];
     let points = [];
 
-    // vertical
-    {
-        const point = findVerticalIntersection(theta);
+    let a = globals.angle;
+    let b = globals.angle;
+    let inc = 1.0;
 
-        if (point != null) {
-            points = points.concat(point);
+    if (count > 1) {
+        a -= fov / 2;
+        b += fov / 2;
+        inc = fov / (count - 1);
+    }
+
+    for (let angle = a; angle <= b; angle += inc) {
+
+        let theta = angle;
+
+        // clamp angle
+        if (theta < 0.0) {
+            theta += 2 * Math.PI;
+        } else if (theta >= 2 * Math.PI) {
+            theta -= 2 * Math.PI;
         }
-    }
 
-    // horizontal
-    {
-        const point = findHorizontalIntersection(theta);
 
-        if (point != null) {
-            points = points.concat(point);
+        // [globals.x, globals.y] = rotate([globals.x, globals.y], globals.angle);
+        // [globals.x, globals.y] = translate([globals.x, globals.y], [dx, dy]);
+
+        // console.log("a = " + a);
+        // console.log("b = " + b);
+        // console.log("i = " + inc);
+        // console.log("angle = " + angle);
+        // console.log("theta = " + theta);
+
+        const pv = findVerticalIntersection(theta);
+        const ph = findHorizontalIntersection(theta);
+
+        let p = null;
+
+        if ((pv != null) && (ph != null)) {
+            // TODO: we can use the distance square here
+            const d0 = distance(pv[0], pv[1]);
+            const d1 = distance(ph[0], ph[1]);
+
+            p = (d0 < d1) ? pv : ph;
+        } else if (pv != null) {
+            p = pv;
+        } else if (ph != null) {
+            p = ph;
         }
-    }
 
-    if (points.length == 4) {
-        // TODO: we can use the distance square here
-        const d0 = distance(points[0], points[1]);
-        const d1 = distance(points[2], points[3]);
-
-        points = points.splice((d0 < d1) ? 0 : 2, 2);
-    }
+        if (p != null) {
+            rays.push(globals.x, globals.y, ...p);
+            // debug
+            points = points.concat(p);
+        } else {
+            // ray to infinity
+        }
+    } // for each theta
 
     gl.deleteBuffer(buffers.rays.buffer);
     const raysBuffer = gl.createBuffer();
 
     gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
-    const length = 500.0;
-    const rays = screenSpaceToNDC([
-        globals.x,
-        globals.y,
-        (points.length == 2) ? points[0] : (globals.x + length * Math.cos(globals.angle)),
-        (points.length == 2) ? points[1] : (globals.y + length * Math.sin(globals.angle)),]);
+    rays = screenSpaceToNDC(rays);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
@@ -817,7 +845,7 @@ function drawScene(gl, programInfo, buffers) {
         const color = [0.0, 1.0, 1.0, 1.0];
         gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
 
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 4.0);
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, 2.0);
     }
 
     {
