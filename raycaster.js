@@ -323,13 +323,23 @@ function getCell(px, py) {
         ppx = px;
         ppy = py;
 
+        console.log("===== getCell =====");
         console.log(globals.x, globals.y);
         console.log(px, py);
         console.log(cx, cy);
+        console.log("===== ======= =====");
     }
 
     const i = cx * globals.cols + cy;
     return globals.grid[i];
+}
+
+function isWall(px, py) {
+    return getCell(px, py) == 1;
+}
+
+function inGrid(px, py) {
+    return ((0.0 <= px) && (px < globals.canvas.width)) && ((0.0 <= py) && (py < globals.canvas.height));
 }
 
 function updateBuffers(gl, buffers) {
@@ -350,7 +360,14 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
-    // find first cell intersection
+    const half = Math.PI / 2;
+
+    const a0 = 2 * Math.PI;
+    const a1 = 3 * half;
+    const a2 = Math.PI;
+    const a3 = half;
+
+    const theta = globals.angle;
 
     let px = globals.x;
     let py = globals.y;
@@ -366,14 +383,12 @@ function updateBuffers(gl, buffers) {
     const l = cx - 1            // left
     const d = cy + globals.size // down
 
-    const half = Math.PI / 2;
-
     let rx = 0.0;
     let ry = 0.0;
 
     // console.log(px, py, dx, dy, r, u, l, d, globals.angle);
 
-    if (((3 * half) <= globals.angle) && (globals.angle < (2 * Math.PI))) {
+    if ((a1 <= theta) && (theta < a0)) {
         // test right and up
         //    ^
         //    | /
@@ -381,7 +396,7 @@ function updateBuffers(gl, buffers) {
         //    |  
         rx = r;
         ry = u;
-    } else if ((Math.PI <= globals.angle) && (globals.angle < (3 * half))) {
+    } else if ((a2 <= theta) && (theta < a1)) {
         // test up and left
         //    ^
         //  \ |  
@@ -389,7 +404,7 @@ function updateBuffers(gl, buffers) {
         //    |  
         rx = l;
         ry = u;
-    } else if ((half <= globals.angle) && (globals.angle < (Math.PI))) {
+    } else if ((a3 <= theta) && (theta < a2)) {
         // test left and down
         //    ^
         //    |  
@@ -407,28 +422,83 @@ function updateBuffers(gl, buffers) {
         ry = d;
     }
 
+    let points = [];
+
+
+
+    // vertical
+
+    if ((theta != a1) && (theta != a3)) {
+        // find first intersection
+        const t = intersect(rx, globals.x, dx);
+        let px = globals.x + t * dx;
+        let py = globals.y + t * dy;
+
+        let count = 0;
+
+        if (inGrid(px, py)) {
+            // debug
+            points.push(px, py);
+            count++;
+            if (isWall(px, py)) {
+                console.log("point " + (count - 1) + " is wall!");
+            }
+
+            // step
+            dx = Math.tan(half - theta);
+            dy = Math.tan(theta);
+            const sign = ((a3 < theta) && (theta < a1)) ? -1 : +1;
+
+            const vstep = dy * sign * globals.size;
+            const hstep = sign * globals.size;
+
+            let found = false;
+
+            // find all following intersections
+            while (!found) {
+
+                px = px + hstep;
+                py = py + vstep;
+
+                found = !inGrid(px, py);
+
+                if (!found) {
+                    // debug
+                    points.push(px, py);
+                    count++;
+                    if (isWall(px, py)) {
+                        console.log("point " + (count - 1) + " is wall!");
+                    }
+                }
+            }
+        }
+    }
+
+    if ((theta != 0.0) && (theta != a2)) {
+        // find all horizontal intersections
+    }
+
     const t0 = (globals.angle == (2 * Math.PI - half)) ? null : intersect(rx, px, dx);
     const t1 = (dy == 0) ? null : intersect(ry, py, dy);
     // const t = Math.min(t0, t1);
 
-    let points = [];
 
     if (t0 != null) {
-        points.push(px + t0 * dx, py + t0 * dy);
+        // points.push(px + t0 * dx, py + t0 * dy);
     }
 
     if (t1 != null) {
-        points.push(px + t1 * dx, py + t1 * dy);
+        // points.push(px + t1 * dx, py + t1 * dy);
     }
 
     // px = px + t * dx;
     // py = py + t * dy;
 
-    let vx = px + t0 * dx;
-    let vy = py + t0 * dy;
+    // let vx = px + t0 * dx;
+    // let vy = py + t0 * dy;
 
-    let hx = px + t1 * dx;
-    let hy = py + t1 * dy;
+    // let hx = px + t1 * dx;
+    // let hy = py + t1 * dy;
 
     let found = false;
 
@@ -451,7 +521,7 @@ function updateBuffers(gl, buffers) {
     const sign = (half < globals.angle) && (globals.angle < (3 * half)) ? -1 : +1;
 
     if (t0 != null) {
-        points.push(points[0] + sign * globals.size, points[1] + dy * sign * globals.size);
+        // points.push(points[0] + sign * globals.size, points[1] + dy * sign * globals.size);
     }
 
     console.log(points);
@@ -478,11 +548,12 @@ function updateBuffers(gl, buffers) {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
+    const length = 500.0;
     const rays = screenSpaceToNDC([
         globals.x,
         globals.y,
-        px,
-        py]);
+        globals.x + length * Math.cos(globals.angle),
+        globals.y + length * Math.sin(globals.angle),]);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
