@@ -8,9 +8,13 @@ const KEY_W = 87;
 
 globals = {
     canvas: null,
-    x: 0,
-    y: 0,
-    angle: 0.0,
+    x: 0,       // player position x
+    y: 0,       // player position y
+    angle: 0.0, // player direction
+    grid: [],
+    rows: 0,  // grid rows
+    cols: 0,  // grid cols
+    size: 64, // grid cell size
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -226,7 +230,7 @@ function screenSpaceToNDC(vertices) {
 
 function initBuffers(gl) {
 
-    const grid = [
+    globals.grid = [
         1, 1, 1, 1, 1, 1, 1, 1,
         1, 0, 0, 0, 0, 0, 0, 1,
         1, 0, 0, 0, 1, 1, 0, 1,
@@ -237,25 +241,24 @@ function initBuffers(gl) {
         1, 1, 1, 1, 1, 1, 1, 1,
     ];
 
-    const rows = 8;
-    const cols = 8;
+    globals.rows = 8;
+    globals.cols = 8;
 
-    console.assert(grid.length == rows * cols);
+    console.assert(globals.grid.length == (globals.rows * globals.cols));
 
-    const size = 64;
-    const half = size / 2;
+    const half = globals.size / 2;
 
     let walls = [];
     let cells = [];
 
-    for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-            const i = row * cols + col;
+    for (let row = 0; row < globals.rows; row++) {
+        for (let col = 0; col < globals.cols; col++) {
+            const i = row * globals.cols + col;
 
-            const x = col * size + half;
-            const y = row * size + half;
+            const x = col * globals.size + half;
+            const y = row * globals.size + half;
 
-            switch (grid[i]) {
+            switch (globals.grid[i]) {
                 case 0:
                     cells.push(x, y);
                     break;
@@ -297,11 +300,36 @@ function initBuffers(gl) {
         cells: { buffer: cellsBuffer, count: cells.length / 2, },
         player: { buffer: null, count: 0, },
         rays: { buffer: null, count: 0, },
+        // debug
+        points: { buffer: null, count: 0, }
     };
 }
 
 function intersect(r, p, d) {
     return Math.abs((r - p) / d);
+}
+
+let ppx = 0.0;
+let ppy = 0.0;
+
+function getCell(px, py) {
+    console.assert((0 <= px < globals.canvas.width) && (0 <= py < globals.canvas.height));
+
+    const cx = Math.floor(px / globals.size);
+    const cy = Math.floor(py / globals.size);
+    console.assert((0 <= cx < globals.cols) && (0 <= cy < globals.rows));
+
+    if (ppx != px || ppy != py) {
+        ppx = px;
+        ppy = py;
+
+        console.log(globals.x, globals.y);
+        console.log(px, py);
+        console.log(cx, cy);
+    }
+
+    const i = cx * globals.cols + cy;
+    return globals.grid[i];
 }
 
 function updateBuffers(gl, buffers) {
@@ -324,56 +352,126 @@ function updateBuffers(gl, buffers) {
 
     // find first cell intersection
 
-    const size = 64;
-
-    const px = globals.x;
-    const py = globals.y;
-    const dx = Math.cos(globals.angle);
-    const dy = Math.sin(globals.angle);
+    let px = globals.x;
+    let py = globals.y;
+    let dx = Math.cos(globals.angle);
+    let dy = Math.sin(globals.angle);
 
     // cell
-    const cx = Math.floor(px / size) * size;
-    const cy = Math.floor(py / size) * size;
+    const cx = Math.floor(px / globals.size) * globals.size;
+    const cy = Math.floor(py / globals.size) * globals.size;
 
-    const r = cx + size   //right
-    const u = cy          // up
-    const l = cx          // left
-    const d = cy + size   // down
+    const r = cx + globals.size // right
+    const u = cy - 1            // up
+    const l = cx - 1            // left
+    const d = cy + globals.size // down
 
     const half = Math.PI / 2;
 
-    let t0 = 0.0;
-    let t1 = 0.0;
+    let rx = 0.0;
+    let ry = 0.0;
 
-    console.log(px, py, dx, dy, r, u, l, d, globals.angle);
+    // console.log(px, py, dx, dy, r, u, l, d, globals.angle);
 
     if (((3 * half) <= globals.angle) && (globals.angle < (2 * Math.PI))) {
         // test right and up
-        const rx = r;
-        const ry = u;
-        t0 = intersect(rx, px, dx);
-        t1 = intersect(ry, py, dy);
+        //    ^
+        //    | /
+        // ---+--->
+        //    |  
+        rx = r;
+        ry = u;
     } else if ((Math.PI <= globals.angle) && (globals.angle < (3 * half))) {
         // test up and left
-        const rx = l;
-        const ry = u;
-        t0 = intersect(rx, px, dx);
-        t1 = intersect(ry, py, dy);
+        //    ^
+        //  \ |  
+        // ---+--->
+        //    |  
+        rx = l;
+        ry = u;
     } else if ((half <= globals.angle) && (globals.angle < (Math.PI))) {
         // test left and down
-        const rx = l;
-        const ry = d;
-        t0 = intersect(rx, px, dx);
-        t1 = intersect(ry, py, dy);
+        //    ^
+        //    |  
+        // ---+--->
+        //  / |  
+        rx = l;
+        ry = d;
     } else {
         // test down and right
-        const rx = r;
-        const ry = d;
-        t0 = intersect(rx, px, dx);
-        t1 = intersect(ry, py, dy);
+        //    ^
+        //    |  
+        // ---+--->
+        //    | \
+        rx = r;
+        ry = d;
     }
 
-    const t = Math.min(t0, t1);
+    const t0 = (globals.angle == (2 * Math.PI - half)) ? null : intersect(rx, px, dx);
+    const t1 = (dy == 0) ? null : intersect(ry, py, dy);
+    // const t = Math.min(t0, t1);
+
+    let points = [];
+
+    if (t0 != null) {
+        points.push(px + t0 * dx, py + t0 * dy);
+    }
+
+    if (t1 != null) {
+        points.push(px + t1 * dx, py + t1 * dy);
+    }
+
+    // px = px + t * dx;
+    // py = py + t * dy;
+
+    let vx = px + t0 * dx;
+    let vy = py + t0 * dy;
+
+    let hx = px + t1 * dx;
+    let hy = py + t1 * dy;
+
+    let found = false;
+
+    // switch (getCell(px, py)) {
+    //     case 0: // empty
+    //         break;
+    //     case 1: // wall
+    //         found = true;
+    //         break;
+    // }
+
+    let v = false;
+    let h = false;
+
+    dx = Math.tan(half - globals.angle);
+    dy = Math.tan(globals.angle);
+
+    // let t = 0.0;
+
+    const sign = (half < globals.angle) && (globals.angle < (3 * half)) ? -1 : +1;
+
+    if (t0 != null) {
+        points.push(points[0] + sign * globals.size, points[1] + dy * sign * globals.size);
+    }
+
+    console.log(points);
+
+    // while (!found) {
+
+    //     v = isWall(vx, vy); // or out of grid
+    //     h = isWall(hx, hy); // or out of grid
+
+    //     if (v && h) {
+    //         found = true;
+    //         t = Math.min(t0, t1);
+    //     }
+
+    //     if (!v) {
+
+    //     }
+
+    //     found = true;
+    // }
 
     gl.deleteBuffer(buffers.rays.buffer);
     const raysBuffer = gl.createBuffer();
@@ -381,18 +479,31 @@ function updateBuffers(gl, buffers) {
     gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
     const rays = screenSpaceToNDC([
+        globals.x,
+        globals.y,
         px,
-        py,
-        px + t * dx,
-        py + t * dy]);
+        py]);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
+
+    // ========== debug points ==========
+
+    gl.deleteBuffer(buffers.points.buffer);
+    const pointsBuffer = gl.createBuffer();
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, pointsBuffer);
+
+    points = screenSpaceToNDC(points);
+
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
 
     return {
         walls: buffers.walls,
         cells: buffers.cells,
         player: { buffer: playerBuffer, count: player.length / 2, },
         rays: { buffer: raysBuffer, count: rays.length / 2, },
+        // debug
+        points: { buffer: pointsBuffer, count: points.length / 2, }
     };
 }
 
@@ -583,6 +694,40 @@ function drawScene(gl, programInfo, buffers) {
         const mode = gl.POINTS;
         const first = 0;
         const count = buffers.player.count;
+        gl.drawArrays(mode, first, count);
+    }
+
+    // draw debug points
+
+    {
+        const numComponents = 2;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.points.buffer);
+        gl.vertexAttribPointer(
+            programInfo.attribLocations.vertexPosition,
+            numComponents,
+            type,
+            normalize,
+            stride,
+            offset
+        );
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    }
+
+    {
+        const color = [0.0, 1.0, 1.0, 1.0];
+        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
+
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, 4.0);
+    }
+
+    {
+        const mode = gl.POINTS;
+        const first = 0;
+        const count = buffers.points.count;
         gl.drawArrays(mode, first, count);
     }
 }
