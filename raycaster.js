@@ -8,11 +8,9 @@ const KEY_W = 87;
 
 const HalfPI = Math.PI / 2;
 
-globals = {
+let globals = {
     canvas2d: null, // top-down debug view
-    canvas3d: null,
-    w: 0, // canvas width
-    h: 0, // canvas height
+    canvas3d: null, // 3D view
     x: 0,       // player position x
     y: 0,       // player position y
     angle: 0.0, // player direction
@@ -20,6 +18,9 @@ globals = {
     rows: 0,  // grid rows
     cols: 0,  // grid cols
     size: 64, // grid cell size
+    w: 0,     // grid width
+    h: 0,     // grid height
+    hits: [], // hit points, one per 3D view column
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -32,27 +33,69 @@ globals = {
 }
 
 function main() {
-    globals.canvas2d = document.getElementById("2d");
-    const gl2d = globals.canvas2d.getContext('webgl');
+    let gl2d = init2d();
+    let gl3d = init3d();
 
-    if (!gl2d) {
-        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
-        return;
-    }
+    // screen size
+    globals.w = globals.cols * globals.size;
+    globals.h = globals.rows * globals.size;
 
-    globals.canvas3d = document.getElementById("3d");
-    const gl3d = globals.canvas3d.getContext('webgl');
+    // init player position and direction
+    globals.x = globals.w / 2;
+    globals.y = globals.h / 2;
+    globals.angle = -Math.PI / 2;
 
-    if (!gl3d) {
-        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
-        return;
-    }
-
-    globals.w = globals.canvas3d.width;
-    globals.h = globals.canvas3d.height;
-
+    // bind keyboard events
     document.onkeydown = shortcuts;
     document.onkeyup = shortcuts;
+
+    stats = {
+        element: document.getElementById("stats"),
+        frames: 0,
+        elapsed: 0.0,
+    };
+
+    prevTime = 0.0
+
+    function render(currTime) {
+        const dt = currTime - prevTime;
+        prevTime = currTime;
+
+        // update stats
+        updateStats(stats, dt);
+
+        // process input
+        processInput(dt);
+
+        if (gl2d.gl != null) {
+            // debug top-down view
+            gl2d.buffers = updateBuffers(gl2d.gl, gl2d.buffers);
+            draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
+        }
+
+        updateTexture(gl3d);
+        draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
+
+        requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+}
+
+function init2d() {
+    let result = {
+        gl: null,
+        programInfo: null,
+        buffers: null,
+    };
+
+    globals.canvas2d = document.getElementById("2d");
+    const gl = globals.canvas2d.getContext('webgl');
+
+    if (!gl) {
+        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
+        return result;
+    }
 
     const vsSource = `
     precision highp float;
@@ -72,53 +115,176 @@ function main() {
     }
   `;
 
-    const shaderProgram = initShaderProgram(gl2d, vsSource, fsSource);
+    const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
     const programInfo = {
         program: shaderProgram,
         attribLocations: {
-            vertexPosition: gl2d.getAttribLocation(shaderProgram, "aVertexPosition"),
-            textureCoord: gl2d.getAttribLocation(shaderProgram, "aTextureCoord"),
+            vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
+            textureCoord: gl.getAttribLocation(shaderProgram, "aTextureCoord"),
         },
         uniformLocations: {
-            uFragColor: gl2d.getUniformLocation(shaderProgram, "uFragColor"),
-            uPointSize: gl2d.getUniformLocation(shaderProgram, "uPointSize"),
+            uFragColor: gl.getUniformLocation(shaderProgram, "uFragColor"),
+            uPointSize: gl.getUniformLocation(shaderProgram, "uPointSize"),
         },
     };
 
-    buffers = initBuffers(gl2d);
+    const buffers = initBuffers2dView(gl);
 
-    stats = {
-        element: document.getElementById("stats"),
-        frames: 0,
-        elapsed: 0.0,
+    result = {
+        gl: gl,
+        programInfo: programInfo,
+        buffers: buffers,
     };
 
-    prevTime = 0.0
+    return result;
+}
 
-    globals.x = globals.w / 2;
-    globals.y = globals.h / 2;
-    globals.angle = -Math.PI / 2;
+function init3d() {
+    let result = {
+        gl: null,
+        programInfo: null,
+        buffers: null,
+        texture: null,
+    };
 
-    function render(currTime) {
-        const dt = currTime - prevTime;
-        prevTime = currTime;
+    globals.canvas3d = document.getElementById("3d");
+    const gl = globals.canvas3d.getContext('webgl');
 
-        // update stats
-        updateStats(stats, dt);
-
-        processInput(dt)
-
-        buffers = updateBuffers(gl2d, buffers);
-
-        // debug top-down view
-        draw2dScene(gl2d, programInfo, buffers);
-
-        draw3dScene(gl3d);
-
-        requestAnimationFrame(render);
+    if (!gl) {
+        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
+        return result;
     }
 
-    requestAnimationFrame(render);
+    const vsSource = `
+    attribute vec4 aVertexPosition;
+    attribute vec2 aTextureCoord;
+    varying highp vec2 vTextureCoord;
+    void main(void) {
+      gl_Position = aVertexPosition;
+      vTextureCoord = aTextureCoord;
+    }
+  `;
+
+    const fsSource = `
+    varying highp vec2 vTextureCoord;
+    uniform sampler2D uSampler;
+    void main(void) {
+      gl_FragColor = texture2D(uSampler, vTextureCoord);
+    }
+  `;
+
+    const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+    const programInfo = {
+        program: shaderProgram,
+        attribLocations: {
+            vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
+            textureCoord: gl.getAttribLocation(shaderProgram, "aTextureCoord"),
+        },
+        uniformLocations: {
+            uSampler: gl.getUniformLocation(shaderProgram, "uSampler"),
+        },
+    };
+
+    buffers = initBuffers3dView(gl);
+
+    result = {
+        gl: gl,
+        programInfo: programInfo,
+        buffers: buffers,
+        texture: null,
+    };
+
+    return result;
+}
+
+function updateTexture(gl3d) {
+    const gl = gl3d.gl;
+
+    gl.deleteTexture(gl3d.texture);
+
+    gl3d.texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, gl3d.texture);
+
+    const w = globals.canvas3d.width;
+    const h = globals.canvas3d.height;
+
+    const level = 0;
+    const internalFormat = gl.RGBA;
+    const width = w;
+    const height = h;
+    const border = 0;
+    const srcFormat = gl.RGBA;
+    const srcType = gl.UNSIGNED_BYTE;
+    const pixel = new Uint8Array(w * h * 4);
+
+
+    // "draw" floor and ceiling
+
+    for (var row = 0; row < h; ++row) {
+        for (var col = 0; col < w; ++col) {
+            const sign = (row < (h / 2)) ? +1 : -1;
+            const color = 127 + (sign * 32) - 16;
+
+            const r = color;
+            const g = color;
+            const b = color;
+
+            const i = (row * w + col) * 4;
+            pixel[i + 0] = r;
+            pixel[i + 1] = g;
+            pixel[i + 2] = b;
+            pixel[i + 3] = 255;
+        }
+    }
+
+    // draw walls
+
+    for (var col = 0; col < w; ++col) {
+        const hit = globals.hits[col];
+
+        if ((hit.distance == null) || (hit.distance <= 0.0)) {
+            continue;
+        }
+
+        // column height
+        const scale = globals.size * 100.0;
+        const height = Math.round(scale / hit.distance) * 2;
+
+        if (height == 0) {
+            continue;
+        }
+
+        const offset = 0 + (h / 2) - (height / 2);
+
+        const row0 = Math.max(0, offset);
+        const row1 = Math.min(offset + height, h);
+
+        for (var row = row0; row < row1; ++row) {
+
+            const i = (row * w + col) * 4;
+
+            const r = 0;
+            const g = 0;
+            const b = hit.bVerOrHor ? 127 : 255;
+
+            pixel[i + 0] = r;
+            pixel[i + 1] = g;
+            pixel[i + 2] = b;
+            pixel[i + 3] = 255;
+        }
+    }
+
+    gl.texImage2D(
+        gl.TEXTURE_2D,
+        level,
+        internalFormat,
+        width,
+        height,
+        border,
+        srcFormat,
+        srcType,
+        pixel
+    );
 }
 
 function shortcuts(event) {
@@ -160,9 +326,9 @@ function rotate(vertex, angle) {
 
 function processInput(dt) {
     // double the speed by pressing SHIFT and modulate with dt
-    step = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.05;
+    let step = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.05;
 
-    n = 0;
+    let n = 0;
     n += (globals.keys[KEY_W] ? 1 : 0);
     n += (globals.keys[KEY_LEFT] ? 1 : 0);
     n += (globals.keys[KEY_RIGHT] ? 1 : 0);
@@ -177,10 +343,10 @@ function processInput(dt) {
         }
     }
 
-    [dx, dy] = [globals.x, globals.y];
+    let [dx, dy] = [globals.x, globals.y];
 
     // screen space -> player space
-    [px, py] = translate([globals.x, globals.y], [-dx, -dy]);
+    let [px, py] = translate([globals.x, globals.y], [-dx, -dy]);
     [px, py] = rotate([px, py], -globals.angle);
 
     // move forward
@@ -253,15 +419,14 @@ function updateStats(stats, dt) {
     stats.element.innerText = "fps: " + (1000 / dt).toFixed(3) + " | " + dt.toFixed(3) + " ms";
 }
 
-// expects an array of N vertices [x0, y0, x1, x1, ..., xN, yN] in screen space
-function screenSpaceToNDC(vertices) {
-    const w = globals.w;
-    const h = globals.h;
+// expects an array of N vertices [x0, y0, x1, x1, ..., xN, yN] in debug view space
+function debugViewToNDC(vertices) {
+    const w = globals.canvas2d.width;
+    const h = globals.canvas2d.height;
     return vertices.map((e, i) => (i % 2 == 0) ? (e / (w / 2) - 1) : (1 - (e / (h / 2))));
 }
 
-function initBuffers(gl) {
-
+function initBuffers2dView(gl) {
     globals.grid = [
         1, 1, 1, 1, 1, 1, 1, 1,
         1, 0, 0, 0, 0, 0, 0, 1,
@@ -309,7 +474,7 @@ function initBuffers(gl) {
     gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
 
     // position in NDC
-    walls = screenSpaceToNDC(walls)
+    walls = debugViewToNDC(walls)
 
     // fill the current buffer
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(walls), gl.STATIC_DRAW);
@@ -322,7 +487,7 @@ function initBuffers(gl) {
     gl.bindBuffer(gl.ARRAY_BUFFER, cellsBuffer);
 
     // position in NDC
-    cells = screenSpaceToNDC(cells)
+    cells = debugViewToNDC(cells)
 
     // fill the current buffer
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cells), gl.STATIC_DRAW);
@@ -332,10 +497,61 @@ function initBuffers(gl) {
         cells: { buffer: cellsBuffer, count: cells.length / 2, },
         player: { buffer: null, count: 0, },
         rays: { buffer: null, count: 0, },
-        // debug
         points: { buffer: null, count: 0, }
     };
 }
+
+function initBuffers3dView(gl) {
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+    // screen size quad
+    const positions = [
+        -1.0, -1.0,
+        +1.0, -1.0,
+        +1.0, +1.0,
+        -1.0, +1.0,
+    ];
+
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    const textureCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer);
+
+    const textureCoordinates = [
+        0.0, 0.0,
+        1.0, 0.0,
+        1.0, 1.0,
+        0.0, 1.0,
+    ];
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array(textureCoordinates),
+        gl.STATIC_DRAW
+    );
+
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+    const indices = [
+        0, 1, 2,
+        0, 2, 3,
+    ];
+
+    gl.bufferData(
+        gl.ELEMENT_ARRAY_BUFFER,
+        new Uint16Array(indices),
+        gl.STATIC_DRAW
+    );
+
+    return {
+        position: positionBuffer,
+        textureCoord: textureCoordBuffer,
+        indices: indexBuffer,
+    };
+}
+
 
 function intersect(r, p, d) {
     return Math.abs((r - p) / d);
@@ -409,7 +625,7 @@ function findVerticalIntersection(theta) {
 
     // neighboring cells
     const r = cx + globals.size // right
-    const l = cx - 1            // left
+    const l = cx - 0.00001      // left
 
     // ray point
     const rx = side ? l : r;
@@ -442,7 +658,7 @@ function findHorizontalIntersection(theta) {
     const cy = Math.floor(py / globals.size) * globals.size;
 
     // neighboring cells
-    const u = cy - 1            // up
+    const u = cy - 0.00001      // up
     const d = cy + globals.size // down
 
     // ray point
@@ -473,32 +689,33 @@ function updateBuffers(gl, buffers) {
     gl.bindBuffer(gl.ARRAY_BUFFER, playerBuffer);
 
     // position in NDC
-    const player = screenSpaceToNDC([globals.x, globals.y]);
+    const player = debugViewToNDC([globals.x, globals.y]);
 
     // fill the current buffer
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(player), gl.STATIC_DRAW);
 
     // ========== rays ==========
 
-    const fov = HalfPI; // field of view
-    const count = 60;   // number of rays
+    const fov = HalfPI / 2;                   // field of view
+    console.assert((0.0 < fov) && (fov < Math.PI));
+    const count = globals.canvas3d.width; // number of rays
 
     let rays = [];
-    let points = []; // debug
+    let points = [];
 
-    let a = globals.angle;
-    let b = globals.angle;
-    let inc = 1.0;
+    // clear hits
+    globals.hits = [];
+
+    let angle = 0.0;
+    let inc = 0.0;
 
     if (count > 1) {
-        a -= fov / 2;
-        b += fov / 2;
+        angle -= (fov / 2);
         inc = fov / (count - 1);
     }
 
-    for (let angle = a; angle <= b; angle += inc) {
-
-        let theta = angle;
+    for (let i = 0; i < count; ++i, angle += inc) {
+        let theta = globals.angle + angle;
 
         // clamp angle
         if (theta < 0.0) {
@@ -512,25 +729,53 @@ function updateBuffers(gl, buffers) {
 
         let p = null;
 
+        let hit = {
+            distance: null,
+            bVerOrHor: null,
+        };
+
         if ((pv != null) && (ph != null)) {
             // TODO: we can use the distance square here
             const d0 = distance(pv[0], pv[1]);
             const d1 = distance(ph[0], ph[1]);
 
-            p = (d0 < d1) ? pv : ph;
+            if (d0 < d1) {
+                p = pv;
+
+                hit.distance = d0;
+                hit.bVerOrHor = true;
+            } else {
+                p = ph;
+
+                hit.distance = d1;
+                hit.bVerOrHor = false;
+            }
         } else if (pv != null) {
             p = pv;
+
+            hit.distance = distance(pv[0], pv[1]);
+            hit.bVerOrHor = true;
         } else if (ph != null) {
             p = ph;
+
+            hit.distance = distance(ph[0], ph[1]);
+            hit.bVerOrHor = false;
         }
 
         if (p != null) {
             rays.push(globals.x, globals.y, ...p);
-            // debug
             points.push(...p);
+
+            // fix fish-eye effect
+            hit.distance *= Math.cos(angle);
+            // const dx = p[0] - globals.x;
+            // const dy = p[1] - globals.y;
+            // hit.distance = dx * Math.cos(globals.angle) + dy * Math.sin(globals.angle);
         } else {
             // ray to infinity
         }
+
+        globals.hits.push(hit);
     } // for each angle
 
     gl.deleteBuffer(buffers.rays.buffer);
@@ -538,18 +783,18 @@ function updateBuffers(gl, buffers) {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, raysBuffer);
 
-    rays = screenSpaceToNDC(rays);
+    rays = debugViewToNDC(rays);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rays), gl.STATIC_DRAW);
 
-    // ========== debug points ==========
+    // ========== hit points ==========
 
     gl.deleteBuffer(buffers.points.buffer);
     const pointsBuffer = gl.createBuffer();
 
     gl.bindBuffer(gl.ARRAY_BUFFER, pointsBuffer);
 
-    points = screenSpaceToNDC(points);
+    points = debugViewToNDC(points);
 
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
 
@@ -558,7 +803,6 @@ function updateBuffers(gl, buffers) {
         cells: buffers.cells,
         player: { buffer: playerBuffer, count: player.length / 2, },
         rays: { buffer: raysBuffer, count: rays.length / 2, },
-        // debug
         points: { buffer: pointsBuffer, count: points.length / 2, }
     };
 }
@@ -611,13 +855,72 @@ function loadShader(gl, type, source) {
     return shader;
 }
 
-function draw3dScene(gl) {
-    gl.clearColor(0.2, 0.2, 0.2, 1.0);
+function draw3dScene(gl, buffers, programInfo, texture) {
+    // TODO: we might skip the clear
+    gl.clearColor(1.0, 1.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+
+    {
+        const numComponents = 2;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+        gl.vertexAttribPointer(
+            programInfo.attribLocations.vertexPosition,
+            numComponents,
+            type,
+            normalize,
+            stride,
+            offset
+        );
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    }
+
+    {
+        const numComponents = 2;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.textureCoord);
+        gl.vertexAttribPointer(
+            programInfo.attribLocations.textureCoord,
+            numComponents,
+            type,
+            normalize,
+            stride,
+            offset
+        );
+        gl.enableVertexAttribArray(programInfo.attribLocations.textureCoord);
+    }
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+
+    gl.useProgram(programInfo.program);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    {
+        const vertexCount = 6;
+        const type = gl.UNSIGNED_SHORT;
+        const offset = 0;
+        gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
+    }
 }
 
 function draw2dScene(gl, programInfo, buffers) {
-    gl.clearColor(0.2, 0.2, 0.2, 1.0);
+
+    const rgb = (127 - 32 - 16) / 255;
+    gl.clearColor(rgb, rgb, rgb, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     gl.useProgram(programInfo.program);
@@ -643,10 +946,10 @@ function draw2dScene(gl, programInfo, buffers) {
     }
 
     {
-        const color = [0.5, 0.5, 0.5, 1.0];
+        const color = [0.0, 0.0, 1.0, 1.0];
         gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
 
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 63.0);
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, globals.size - 1);
     }
 
     {
@@ -656,7 +959,7 @@ function draw2dScene(gl, programInfo, buffers) {
         gl.drawArrays(mode, first, count);
     }
 
-    // draw cells
+    // draw floor
 
     {
         const numComponents = 2;
@@ -677,10 +980,11 @@ function draw2dScene(gl, programInfo, buffers) {
     }
 
     {
-        const color = [0.3, 0.3, 0.3, 1.0];
+        const rgb = (127 + 32 - 16) / 255;
+        const color = [rgb, rgb, rgb, 1.0];
         gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
 
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 63.0);
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, globals.size - 1);
     }
 
     {
@@ -713,8 +1017,6 @@ function draw2dScene(gl, programInfo, buffers) {
     {
         const color = [1.0, 0.0, 1.0, 1.0];
         gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-
-        // gl.uniform1f(programInfo.uniformLocations.uPointSize, 4.0);
     }
 
     {
@@ -745,10 +1047,10 @@ function draw2dScene(gl, programInfo, buffers) {
     }
 
     {
-        const color = [0.0, 1.0, 0.0, 1.0];
+        const color = [1.0, 1.0, 0.0, 1.0];
         gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
 
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 4.0);
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, 5.0);
     }
 
     {
