@@ -217,18 +217,15 @@ function updateTexture(gl3d) {
     const srcType = gl.UNSIGNED_BYTE;
     const pixel = new Uint8Array(w * h * 4);
 
-
     // "draw" floor and ceiling
 
     for (var row = 0; row < h; ++row) {
+        const sign = (row < (h / 2)) ? +1 : -1;
+        const color = 127 + (sign * 32) - 16;
+        const r = color;
+        const g = color;
+        const b = color;
         for (var col = 0; col < w; ++col) {
-            const sign = (row < (h / 2)) ? +1 : -1;
-            const color = 127 + (sign * 32) - 16;
-
-            const r = color;
-            const g = color;
-            const b = color;
-
             const i = (row * w + col) * 4;
             pixel[i + 0] = r;
             pixel[i + 1] = g;
@@ -236,6 +233,42 @@ function updateTexture(gl3d) {
             pixel[i + 3] = 255;
         }
     }
+
+    // const texture = [
+    //     1, 1, 0, 0, 0, 0, 0, 0,
+    //     1, 1, 1, 1, 0, 0, 0, 0,
+    //     1, 1, 1, 1, 1, 1, 0, 0,
+    //     1, 1, 1, 1, 1, 1, 1, 1,
+    //     1, 1, 1, 1, 1, 1, 1, 1,
+    //     1, 1, 1, 1, 1, 1, 0, 0,
+    //     1, 1, 1, 1, 0, 0, 0, 0,
+    //     1, 1, 0, 0, 0, 0, 0, 0,
+    // ];
+
+    // const texture = [
+    //     0, 0, 0, 1, 1, 0, 0, 0,
+    //     0, 0, 0, 1, 1, 0, 0, 0,
+    //     0, 0, 1, 1, 1, 1, 0, 0,
+    //     0, 0, 1, 1, 1, 1, 0, 0,
+    //     0, 1, 1, 1, 1, 1, 1, 0,
+    //     0, 1, 1, 1, 1, 1, 1, 0,
+    //     1, 1, 1, 1, 1, 1, 1, 1,
+    //     1, 1, 1, 1, 1, 1, 1, 1,
+    // ];
+
+    const texture = [
+        0, 1, 0, 1, 0, 1, 0, 1,
+        1, 0, 1, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 1, 0, 1,
+        1, 0, 1, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 1, 0, 1,
+        1, 0, 1, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 1, 0, 1,
+        1, 0, 1, 0, 1, 0, 1, 0,
+    ];
+
+    const tw = 8;
+    const th = 8;
 
     // draw walls
 
@@ -247,7 +280,7 @@ function updateTexture(gl3d) {
         }
 
         // column height
-        const scale = globals.size * 100.0;
+        const scale = globals.size * 318.5;
         const height = Math.round(scale / hit.distance) * 2;
 
         if (height == 0) {
@@ -259,14 +292,41 @@ function updateTexture(gl3d) {
         const row0 = Math.max(0, offset);
         const row1 = Math.min(offset + height, h);
 
-        for (var row = row0; row < row1; ++row) {
+        const p = hit.bVerOrHor ? hit.py : hit.px;
+        const c = Math.floor(p / globals.size) * globals.size;
+        const side = (hit.bVerOrHor ? (hit.px - globals.x) : (hit.py - globals.y)) > 0; // 0 -> l/u, 1 -> r/d
+        let u = (p - c) / globals.size; // (globals.size - 0.000001)
+        u = ((hit.bVerOrHor && !side) || (!hit.bVerOrHor && side)) ? (1 - u) : u;
+        console.assert((0.0 <= u) && (u <= 1.0));
 
-            const i = (row * w + col) * 4;
+        const padding = (height - h) / 2;
+
+        for (var row = row0; row < row1; ++row) {
+            // flip vertically
+            const v = 1.0 - (row + padding) / (height - 1);
+            console.assert((0.0 <= v) && (v <= 1.0));
+            const tx = Math.min(Math.floor(u * tw), tw - 1);
+            const ty = Math.min(Math.floor(v * th), th - 1);
+            console.assert((0 <= tx) && (tx < tw));
+            console.assert((0 <= ty) && (ty < th));
+            const j = ty * tw + tx;
+            console.assert((0 <= j) && (j < tw * th));
+
+            const t = texture[j] * (hit.bVerOrHor ? 127 : 255);
 
             const r = 0;
-            const g = 0;
+            const g = t;
             const b = hit.bVerOrHor ? 127 : 255;
 
+            // const r = u * 255;
+            // const g = v * 255;
+            // const b = 0;
+
+            // const r = tx * 36;
+            // const g = ty * 36;
+            // const b = 0;
+
+            const i = (row * w + col) * 4;
             pixel[i + 0] = r;
             pixel[i + 1] = g;
             pixel[i + 2] = b;
@@ -732,6 +792,8 @@ function updateBuffers(gl, buffers) {
         let hit = {
             distance: null,
             bVerOrHor: null,
+            px: 0.0,
+            py: 0.0,
         };
 
         if ((pv != null) && (ph != null)) {
@@ -771,6 +833,9 @@ function updateBuffers(gl, buffers) {
             // const dx = p[0] - globals.x;
             // const dy = p[1] - globals.y;
             // hit.distance = dx * Math.cos(globals.angle) + dy * Math.sin(globals.angle);
+
+            hit.px = p[0];
+            hit.py = p[1];
         } else {
             // ray to infinity
         }
