@@ -21,6 +21,11 @@ let globals = {
     w: 0,     // grid width
     h: 0,     // grid height
     hits: [], // hit points, one per 3D view column
+    walls: [],
+    palette: [],
+    ready0: false,
+    ready1: false,
+    i: 0,
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -32,7 +37,140 @@ let globals = {
     }
 }
 
+function loadAssets(buffer) {
+    let array = new Uint16Array(buffer.slice(0, 3 * 2));
+
+    const chunks = array[0]; // walls + sprites + sounds
+    const walls = array[1]; // first sprite chunk -> walls
+    const sounds = array[2]; // first sound chunk -> walls + sprites
+
+    // let adresses = new Uint32Array(buffer.slice(3 * 2, chunks * 4));
+    // let lengths = new Uint16Array(buffer.slice(3 * 2 + chunks * 4, chunks * 2));
+
+    const header = 3 * 2 + chunks * 4 + chunks * 2 + 112;
+
+    for (let i = 0; i < walls; ++i) {
+        const size = 64 * 64;
+        const offset = header + i * size;
+        const wall = new Uint8Array(buffer.slice(offset, offset + size));
+        globals.walls.push(wall);
+    }
+
+    globals.ready0 = true;
+}
+
+function loadPalette(buffer) {
+    const size = 256 * 3;
+    const offset = 893 - size - 6;
+    let array = new Uint8Array(buffer.slice(offset, offset + size));
+
+    for (let i = 0; i < 256; ++i) {
+        const color = {
+            r: array[i * 3 + 0] * 4,
+            g: array[i * 3 + 1] * 4,
+            b: array[i * 3 + 2] * 4,
+        };
+        globals.palette[i] = color;
+    }
+
+    globals.ready1 = true;
+}
+
+function loadFile(name, func) {
+    const req = new XMLHttpRequest();
+
+    req.open("GET", "/" + name, true);
+    req.responseType = "arraybuffer";
+
+    req.onload = (event) => {
+        const buffer = req.response;
+        if (buffer) {
+            func(buffer);
+        }
+    };
+
+    req.send(null);
+}
+
+let prev = -1;
+
+function getPaletteColor(i, j) {
+    if (globals.ready0 && globals.ready1) {
+        const k = globals.walls[i][j];
+        return globals.palette[k];
+    }
+    else {
+        return { r: 0, g: 0, b: 0, };
+    }
+}
+
 function main() {
+
+    // const req = new XMLHttpRequest();
+    // req.open("GET", "/VSWAP.WL6", true);
+    // req.responseType = "arraybuffer";
+
+    // req.onload = (event) => {
+    //     const buffer = req.response;
+    //     if (buffer) {
+    //         // const byteArray = new Uint8Array(buffer);
+    //         // // byteArray.forEach((element, index) => {
+    //         // //     // do something with each byte in the array
+    //         // // });
+    //         // console.log(byteArray[0].toString(16), byteArray[1].toString(16));
+
+    //         // const i = (byteArray[1] << 8) | byteArray[0];
+    //         // console.log(i);
+
+    //         let array = new Uint16Array(buffer.slice(0, 3 * 2));
+
+    //         const chunks = array[0]; // walls + sprites + sounds
+    //         const walls = array[1]; // first sprite chunk -> walls
+    //         const sounds = array[2]; // first sound chunk -> walls + sprites
+
+    //         // let adresses = new Uint32Array(buffer.slice(3 * 2, chunks * 4));
+    //         // let lengths = new Uint16Array(buffer.slice(3 * 2 + chunks * 4, chunks * 2));
+
+    //         const header = 3 * 2 + chunks * 4 + chunks * 2 - 16;
+
+    //         for (let i = 0; i < walls; ++i) {
+    //             const size = 64 * 64;
+    //             const offset = header + i * size + size * 70 + 64 * 2;
+    //             const wall = new Uint8Array(buffer.slice(offset, offset + size));
+
+    //             let temp = new Uint8Array(64 * 64);
+    //             for (let col = 0; col < 64; ++col) {
+    //                 for (let row = 0; row < 64; ++row) {
+    //                     temp[row * 64 + col] = wall[col * 64 + row];
+    //                 }
+    //             }
+
+    //             globals.walls.push(temp);
+    //         }
+    //     }
+
+    //     globals.ready = true;
+    //     console.log("walls ready");
+    // };
+
+    // req.send(null);
+
+    // random palette
+    for (let i = 0; i < 256; ++i) {
+        const color = {
+            // r: Math.floor(Math.random() * 256),
+            // g: Math.floor(Math.random() * 256),
+            // b: Math.floor(Math.random() * 256),
+            r: 0,
+            g: 0,
+            b: 0,
+        };
+        globals.palette.push(color);
+    }
+
+    loadFile("VSWAP.WL6", loadAssets);
+    loadFile("GAMEPAL.OBJ", loadPalette);
+
     let gl2d = init2d();
     let gl3d = init3d();
 
@@ -267,8 +405,8 @@ function updateTexture(gl3d) {
         1, 0, 1, 0, 1, 0, 1, 0,
     ];
 
-    const tw = 8;
-    const th = 8;
+    const tw = 64;
+    const th = 64;
 
     // draw walls
 
@@ -303,28 +441,36 @@ function updateTexture(gl3d) {
 
         for (var row = row0; row < row1; ++row) {
             // flip vertically
-            const v = 1.0 - (row + padding) / (height - 1);
+            const v = 1 - (row + padding) / (height - 1);
             console.assert((0.0 <= v) && (v <= 1.0));
             const tx = Math.min(Math.floor(u * tw), tw - 1);
             const ty = Math.min(Math.floor(v * th), th - 1);
             console.assert((0 <= tx) && (tx < tw));
             console.assert((0 <= ty) && (ty < th));
-            const j = ty * tw + tx;
+            const j = tx * tw + ty;
             console.assert((0 <= j) && (j < tw * th));
 
-            const t = texture[j] * (hit.bVerOrHor ? 127 : 255);
+            // const t = texture[j] * (hit.bVerOrHor ? 127 : 255);
 
-            const r = 0;
-            const g = t;
-            const b = hit.bVerOrHor ? 127 : 255;
+            // const r = 0;
+            // const g = t;
+            // const b = hit.bVerOrHor ? 127 : 255;
 
             // const r = u * 255;
             // const g = v * 255;
             // const b = 0;
 
-            // const r = tx * 36;
-            // const g = ty * 36;
+            // const r = Math.min(tx * 4, 255);
+            // const g = Math.min(ty * 4, 255);
             // const b = 0;
+
+            let color = getPaletteColor((hit.ct - 1) + (hit.bVerOrHor ? 1 : 0), j);
+            // let color = getPaletteColor(globals.i + (hit.bVerOrHor ? 1 : 0), j);
+
+            const scale = 0; // hit.bVerOrHor ? 1 : 0;
+            const r = color.r >> scale;
+            const g = color.g >> scale;
+            const b = color.b >> scale;
 
             const i = (row * w + col) * 4;
             pixel[i + 0] = r;
@@ -361,6 +507,14 @@ function shortcuts(event) {
                 globals.keys[event.keyCode] = (event.type == "keydown");
                 break;
             }
+        case 38: // up
+        case 40: // down
+            if (event.type == "keydown") {
+                globals.i += (event.keyCode == 38) ? +2 : -2;
+                globals.i = Math.min(Math.max(0, globals.i), 100);
+                console.log(globals.i);
+            }
+            break;
         default:
             {
                 break;
@@ -434,13 +588,13 @@ function processInput(dt) {
     [px, py] = translate([px, py], [dx, dy]);
 
     // check wall collision
-    if (!isWall(px, globals.y)) {
+    if (isEmpty(px, globals.y)) {
         // apply translation
         globals.x = px;
     }
 
     // check wall collision
-    if (!isWall(globals.x, py)) {
+    if (isEmpty(globals.x, py)) {
         // apply translation
         globals.y = py;
     }
@@ -488,14 +642,14 @@ function debugViewToNDC(vertices) {
 
 function initBuffers2dView(gl) {
     globals.grid = [
-        1, 1, 1, 1, 1, 1, 1, 1,
-        1, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 1, 1, 0, 1,
-        1, 0, 1, 0, 0, 1, 0, 1,
-        1, 0, 1, 0, 0, 1, 0, 1,
-        1, 0, 1, 1, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 1,
-        1, 1, 1, 1, 1, 1, 1, 1,
+        15, 15, 81, 9, 13, 81, 15, 15,
+        15, 0, 0, 0, 0, 0, 0, 15,
+        81, 0, 1, 0, 0, 1, 0, 81,
+        9, 0, 0, 0, 0, 0, 0, 9,
+        9, 0, 0, 0, 0, 0, 0, 9,
+        81, 0, 1, 0, 0, 1, 0, 81,
+        15, 0, 0, 0, 0, 0, 0, 15,
+        15, 15, 81, 9, 9, 81, 15, 15,
     ];
 
     globals.rows = 8;
@@ -515,11 +669,13 @@ function initBuffers2dView(gl) {
             const x = col * globals.size + half;
             const y = row * globals.size + half;
 
+            globals.grid[i] *= 1 + 2 * 0;
+
             switch (globals.grid[i]) {
                 case 0:
                     cells.push(x, y);
                     break;
-                case 1:
+                default:
                     walls.push(x, y);
                     break;
             }
@@ -628,8 +784,8 @@ function getCell(px, py) {
     return globals.grid[i];
 }
 
-function isWall(px, py) {
-    return getCell(px, py) == 1;
+function isEmpty(px, py) {
+    return getCell(px, py) == 0;
 }
 
 function inGrid(px, py) {
@@ -647,8 +803,12 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
 
     if (!inGrid(px, py)) {
         return null;
-    } else if (isWall(px, py)) {
-        return [px, py];
+    } else {
+        const cell = getCell(px, py);
+
+        if (cell != 0) {
+            return { cell: cell, px: px, py: py, };
+        }
     }
 
     // find first wall intersection
@@ -658,8 +818,12 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
 
         if (!inGrid(px, py)) {
             return null;
-        } else if (isWall(px, py)) {
-            return [px, py];
+        } else {
+            const cell = getCell(px, py);
+
+            if (cell != 0) {
+                return { cell: cell, px: px, py: py, };
+            }
         }
     }
 }
@@ -794,12 +958,13 @@ function updateBuffers(gl, buffers) {
             bVerOrHor: null,
             px: 0.0,
             py: 0.0,
+            ct: null, // cell type
         };
 
         if ((pv != null) && (ph != null)) {
             // TODO: we can use the distance square here
-            const d0 = distance(pv[0], pv[1]);
-            const d1 = distance(ph[0], ph[1]);
+            const d0 = distance(pv.px, pv.py);
+            const d1 = distance(ph.px, ph.py);
 
             if (d0 < d1) {
                 p = pv;
@@ -815,18 +980,18 @@ function updateBuffers(gl, buffers) {
         } else if (pv != null) {
             p = pv;
 
-            hit.distance = distance(pv[0], pv[1]);
+            hit.distance = distance(pv.px, pv.py);
             hit.bVerOrHor = true;
         } else if (ph != null) {
             p = ph;
 
-            hit.distance = distance(ph[0], ph[1]);
+            hit.distance = distance(ph.px, ph.py);
             hit.bVerOrHor = false;
         }
 
         if (p != null) {
-            rays.push(globals.x, globals.y, ...p);
-            points.push(...p);
+            rays.push(globals.x, globals.y, p.px, p.py);
+            points.push(p.px, p.py);
 
             // fix fish-eye effect
             hit.distance *= Math.cos(angle);
@@ -834,8 +999,9 @@ function updateBuffers(gl, buffers) {
             // const dy = p[1] - globals.y;
             // hit.distance = dx * Math.cos(globals.angle) + dy * Math.sin(globals.angle);
 
-            hit.px = p[0];
-            hit.py = p[1];
+            hit.px = p.px;
+            hit.py = p.py;
+            hit.ct = p.cell;
         } else {
             // ray to infinity
         }
