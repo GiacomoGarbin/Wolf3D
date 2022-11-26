@@ -9,12 +9,13 @@ const KEY_W = 87;
 const HalfPI = Math.PI / 2;
 
 let globals = {
+    loaders: [], // files to load
     canvas2d: null, // top-down debug view
     canvas3d: null, // 3D view
     x: 0,       // player position x
     y: 0,       // player position y
     angle: 0.0, // player direction
-    grid: [],
+    grid: [], // level map grid
     rows: 0,  // grid rows
     cols: 0,  // grid cols
     size: 64, // grid cell size
@@ -23,9 +24,9 @@ let globals = {
     hits: [], // hit points, one per 3D view column
     walls: [],
     palette: [],
-    ready0: false,
-    ready1: false,
-    i: 0,
+    offsets: null,
+    levels: [],
+    // i: 0,
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -38,6 +39,8 @@ let globals = {
 }
 
 function loadAssets(buffer) {
+    // TODO: add asserts
+
     let array = new Uint16Array(buffer.slice(0, 3 * 2));
 
     const chunks = array[0]; // walls + sprites + sounds
@@ -55,31 +58,252 @@ function loadAssets(buffer) {
         const wall = new Uint8Array(buffer.slice(offset, offset + size));
         globals.walls.push(wall);
     }
-
-    globals.ready0 = true;
 }
 
 function loadPalette(buffer) {
-    const size = 256 * 3;
-    const offset = 893 - size - 6;
-    let array = new Uint8Array(buffer.slice(offset, offset + size));
+    console.assert(buffer.byteLength == 893);
+
+    const size = 256 * 3; // 256 rbg colors
+    const offset = buffer.byteLength - size - 6;
+    const array = new Uint8Array(buffer.slice(offset, offset + size));
 
     for (let i = 0; i < 256; ++i) {
         const color = {
+            // max channel value ~64, then multiply by 4 to get brighter colors
             r: array[i * 3 + 0] * 4,
             g: array[i * 3 + 1] * 4,
             b: array[i * 3 + 2] * 4,
         };
-        globals.palette[i] = color;
+        globals.palette.push(color);
     }
-
-    globals.ready1 = true;
 }
 
-function loadFile(name, func) {
+function loadMapHead(buffer) {
+    const RLEW = new Uint16Array(buffer.slice(0, 2));
+    console.assert(RLEW == 0xABCD);
+
+    globals.offsets = new Uint32Array(buffer.slice(2, 2 + 100 * 4));
+    console.assert(globals.offsets != null);
+}
+
+function RLEW(view) {
+    const token = 0xABCD;
+
+    // const view = new DataView(data);
+    const size = view.getUint16(0, true); // decoded data byte size
+
+    let buffer = new ArrayBuffer(size);
+    let output = new DataView(buffer);
+
+    let i = 2; // input view offset
+    let j = 0; // output view offset
+
+    try {
+        while (i < view.byteLength) {
+            const word = view.getUint16(i, true);
+            i += 2;
+            if (word == token) {
+                const n = view.getUint16(i, true);
+                const x = view.getUint16(i + 2, true);
+                i += 4;
+                for (let k = 0; k < n; ++k) {
+                    output.setUint16(j, x, true);
+                    j += 2;
+                }
+            } else {
+                output.setUint16(j, word, true);
+                j += 2;
+            }
+        }
+    } catch (error) {
+        // console.warn("decode failed");
+        return null;
+    }
+
+    return output;
+}
+
+function Carmack(view) {
+    const size = view.getUint16(0, true); // decoded data byte size
+
+    let buffer = new ArrayBuffer(size);
+    let output = new DataView(buffer);
+
+    let i = 2; // input view offset
+    let j = 0; // output view offset
+
+    try {
+        while (i < view.byteLength) {
+            const x = view[i];
+            const y = view[i + 1];
+            i += 2;
+
+            if ((x == 0) && ((y == 0xA7) || (y == 0xA8))) {
+                const z = view[i];
+
+                // should swap z and y ?
+                output.setUint8(j, z);
+                output.setUint8(j + 1, y);
+                j += 2;
+            } else if (y == 0xA7) { // near pointer
+                const z = view[i]; // offset in words (counted backwards from the current location in the output)
+                i += 1;
+
+                const word = output.getUint16(j - z * 2, true);
+
+                for (let k = 0; k < x; ++k) {
+                    output.setUint16(j, word, true);
+                    j += 2;
+                }
+
+            } else if (y == 0xA8) { // far pointer
+                const z = view.getUint16(i, true); // absolute offset in words from which the repeated sequence starts
+                i += 2;
+
+                for (let k = 0; k < x; ++k) {
+                    const word = output.getUint16(z + k * 2, true);
+                    output.setUint16(j, word, true);
+                    j += 2;
+                }
+            } else {
+                // should swap x and y ?
+                output.setUint8(j, x);
+                output.setUint8(j + 1, y);
+                j += 2;
+            }
+        }
+    } catch (error) {
+        // console.warn("decode failed");
+        return null;
+    }
+
+    return output;
+}
+
+function loadGameMaps(buffer) {
+    // the decompressed data for each plane should be 8192 bytes long
+
+    for (let i = 0; i < 60; ++i) {
+        let level = {
+            header: null,
+            planes: [],
+        };
+
+        // ========== HEADER ==========
+
+        // level map header, 42 bytes
+        let header = {
+            planes: [],
+            width: 0,
+            height: 0,
+            name: null,
+        };
+
+        // plane 0, 1 and 2 offsets
+        let offset = globals.offsets[i];
+        let size = 3 * 4;
+        const offsets = new Uint32Array(buffer.slice(offset, offset + size));
+
+        // plane 0, 1 and 2 sizes
+        offset += size;
+        size = 3 * 2;
+        const sizes = new Uint16Array(buffer.slice(offset, offset + size));
+
+        for (let j = 0; j < 3; ++j) {
+            const plane = {
+                offset: offsets[j],
+                size: sizes[j],
+            }
+            header.planes.push(plane);
+        }
+
+        // grid width and height, always 64x64
+        offset += size;
+        size = 2 * 2;
+        const grid = new Uint16Array(buffer.slice(offset, offset + size));
+
+        header.width = grid[0];
+        header.height = grid[1];
+        console.assert((header.width == 64) && (header.height == 64));
+
+        // map name
+        offset += size;
+        size = 16;
+        const name = new Uint8Array(buffer.slice(offset, offset + size));
+
+        header.name = new TextDecoder().decode(name);
+
+        level.header = header;
+
+        // ========== PLANES ==========
+
+        for (let j = 0; j < 3; ++j) {
+            const offset = header.planes[j].offset;
+            const size = header.planes[j].size;
+
+            if ((offset % 2) != 0) {
+                console.warn("plane " + j + " offset of level " + i + " is odd", header);
+            }
+
+            if ((size % 2) != 0) {
+                console.error("plane " + j + " size of level " + i + " is odd, SKIP LEVEL!", header);
+                continue;
+            }
+
+            // let data = buffer.slice(offset, offset + size);
+            let data = new DataView(buffer.slice(offset, offset + size));
+
+            // try RLEW decode data
+            data = RLEW(data);
+
+            if (data == null) {
+                console.error("plane " + j + " failed to RLEW decode of level " + i + ", SKIP LEVEL!", header);
+                continue;
+            }
+
+            // try Carmack decode data
+            data = Carmack(data);
+
+            if (data == null) {
+                console.error("plane " + j + " failed to Carmack decode of level " + i + ", SKIP LEVEL!", header);
+                continue;
+            }
+
+            if (j == 0) {
+                // ========== PLANE 0 ==========
+
+                // 000 - 063	Walls
+                // 090 - 091	Regular unlocked door(oriented)
+                // 092 - 093	Gold - locked door(oriented)
+                // 094 - 095	Silver - locked door(oriented)
+                // 100 - 101	Elevator door(oriented)
+                // 106 - 143	Walkable tile(room)
+            }
+
+            level.planes[j] = data;
+        }
+
+        globals.levels.push(level);
+    }
+}
+
+function markLoadDone(loaders, name) {
+    for (let loader of loaders) {
+        if (loader.name == name) {
+            loader.done = true;
+            return true;
+        }
+        if (markLoadDone(loader.next, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function loadFile(name, func, next) {
     const req = new XMLHttpRequest();
 
-    req.open("GET", "/" + name, true);
+    req.open("GET", "/data/" + name, true);
     req.responseType = "arraybuffer";
 
     req.onload = (event) => {
@@ -89,88 +313,26 @@ function loadFile(name, func) {
         }
     };
 
+    req.onloadend = (event) => {
+        markLoadDone(globals.loaders, name);
+        isEngineReady();
+
+        for (const loader of next) {
+            loadFile(loader.name, loader.func, loader.next);
+        }
+    };
+
     req.send(null);
 }
 
 let prev = -1;
 
 function getPaletteColor(i, j) {
-    if (globals.ready0 && globals.ready1) {
-        const k = globals.walls[i][j];
-        return globals.palette[k];
-    }
-    else {
-        return { r: 0, g: 0, b: 0, };
-    }
+    const k = globals.walls[i][j];
+    return globals.palette[k];
 }
 
 function main() {
-
-    // const req = new XMLHttpRequest();
-    // req.open("GET", "/VSWAP.WL6", true);
-    // req.responseType = "arraybuffer";
-
-    // req.onload = (event) => {
-    //     const buffer = req.response;
-    //     if (buffer) {
-    //         // const byteArray = new Uint8Array(buffer);
-    //         // // byteArray.forEach((element, index) => {
-    //         // //     // do something with each byte in the array
-    //         // // });
-    //         // console.log(byteArray[0].toString(16), byteArray[1].toString(16));
-
-    //         // const i = (byteArray[1] << 8) | byteArray[0];
-    //         // console.log(i);
-
-    //         let array = new Uint16Array(buffer.slice(0, 3 * 2));
-
-    //         const chunks = array[0]; // walls + sprites + sounds
-    //         const walls = array[1]; // first sprite chunk -> walls
-    //         const sounds = array[2]; // first sound chunk -> walls + sprites
-
-    //         // let adresses = new Uint32Array(buffer.slice(3 * 2, chunks * 4));
-    //         // let lengths = new Uint16Array(buffer.slice(3 * 2 + chunks * 4, chunks * 2));
-
-    //         const header = 3 * 2 + chunks * 4 + chunks * 2 - 16;
-
-    //         for (let i = 0; i < walls; ++i) {
-    //             const size = 64 * 64;
-    //             const offset = header + i * size + size * 70 + 64 * 2;
-    //             const wall = new Uint8Array(buffer.slice(offset, offset + size));
-
-    //             let temp = new Uint8Array(64 * 64);
-    //             for (let col = 0; col < 64; ++col) {
-    //                 for (let row = 0; row < 64; ++row) {
-    //                     temp[row * 64 + col] = wall[col * 64 + row];
-    //                 }
-    //             }
-
-    //             globals.walls.push(temp);
-    //         }
-    //     }
-
-    //     globals.ready = true;
-    //     console.log("walls ready");
-    // };
-
-    // req.send(null);
-
-    // random palette
-    for (let i = 0; i < 256; ++i) {
-        const color = {
-            // r: Math.floor(Math.random() * 256),
-            // g: Math.floor(Math.random() * 256),
-            // b: Math.floor(Math.random() * 256),
-            r: 0,
-            g: 0,
-            b: 0,
-        };
-        globals.palette.push(color);
-    }
-
-    loadFile("VSWAP.WL6", loadAssets);
-    loadFile("GAMEPAL.OBJ", loadPalette);
-
     let gl2d = init2d();
     let gl3d = init3d();
 
@@ -507,14 +669,14 @@ function shortcuts(event) {
                 globals.keys[event.keyCode] = (event.type == "keydown");
                 break;
             }
-        case 38: // up
-        case 40: // down
-            if (event.type == "keydown") {
-                globals.i += (event.keyCode == 38) ? +2 : -2;
-                globals.i = Math.min(Math.max(0, globals.i), 100);
-                console.log(globals.i);
-            }
-            break;
+        // case 38: // up
+        // case 40: // down
+        //     if (event.type == "keydown") {
+        //         globals.i += (event.keyCode == 38) ? +2 : -2;
+        //         globals.i = Math.min(Math.max(0, globals.i), 100);
+        //         console.log(globals.i);
+        //     }
+        //     break;
         default:
             {
                 break;
@@ -1326,4 +1488,59 @@ function draw2dScene(gl, programInfo, buffers) {
     }
 }
 
-window.onload = main;
+function isEngineReady() {
+    if (isLoadDone(globals.loaders)) {
+        const event = new CustomEvent('main');
+        window.dispatchEvent(event);
+    }
+}
+
+function isLoadDone(loaders) {
+    for (const loader of loaders) {
+        if (!loader.done) {
+            return false;
+        }
+        if (!isLoadDone(loader.next)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function init() {
+    globals.loaders = [
+        {
+            name: "VSWAP.WL6",
+            func: loadAssets,
+            done: false,
+            next: [],
+        },
+        {
+            name: "GAMEPAL.OBJ",
+            func: loadPalette,
+            done: false,
+            next: [],
+        },
+        {
+            name: "MAPHEAD.WL6",
+            func: loadMapHead,
+            done: false,
+            next: [
+                {
+                    name: "GAMEMAPS.WL6",
+                    func: loadGameMaps,
+                    done: false,
+                    next: [],
+                }
+            ],
+        },
+    ];
+
+    window.addEventListener('main', (event) => { main(); }, false);
+
+    for (const loader of globals.loaders) {
+        loadFile(loader.name, loader.func, loader.next);
+    }
+}
+
+window.onload = init;
