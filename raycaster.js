@@ -336,13 +336,11 @@ function main() {
     let gl2d = init2d();
     let gl3d = init3d();
 
-    // screen size
-    globals.w = globals.cols * globals.size;
-    globals.h = globals.rows * globals.size;
-
     // init player position and direction
-    globals.x = globals.w / 2;
-    globals.y = globals.h / 2;
+    // globals.x = globals.w / 2;
+    // globals.y = globals.h / 2;
+    globals.x = globals.size + (globals.size / 2);
+    globals.y = globals.size + (globals.size / 2);
     globals.angle = -Math.PI / 2;
 
     // bind keyboard events
@@ -797,27 +795,32 @@ function updateStats(stats, dt) {
 
 // expects an array of N vertices [x0, y0, x1, x1, ..., xN, yN] in debug view space
 function debugViewToNDC(vertices) {
-    const w = globals.canvas2d.width;
-    const h = globals.canvas2d.height;
+    const w = globals.w;
+    const h = globals.h;
     return vertices.map((e, i) => (i % 2 == 0) ? (e / (w / 2) - 1) : (1 - (e / (h / 2))));
 }
 
 function initBuffers2dView(gl) {
-    globals.grid = [
-        15, 15, 81, 9, 13, 81, 15, 15,
-        15, 0, 0, 0, 0, 0, 0, 15,
-        81, 0, 1, 0, 0, 1, 0, 81,
-        9, 0, 0, 0, 0, 0, 0, 9,
-        9, 0, 0, 0, 0, 0, 0, 9,
-        81, 0, 1, 0, 0, 1, 0, 81,
-        15, 0, 0, 0, 0, 0, 0, 15,
-        15, 15, 81, 9, 9, 81, 15, 15,
-    ];
+    // globals.grid = [
+    //     15, 15, 81, 9, 13, 81, 15, 15,
+    //     15, 0, 0, 0, 0, 0, 0, 15,
+    //     81, 0, 1, 0, 0, 1, 0, 81,
+    //     9, 0, 0, 0, 0, 0, 0, 9,
+    //     9, 0, 0, 0, 0, 0, 0, 9,
+    //     81, 0, 1, 0, 0, 1, 0, 81,
+    //     15, 0, 0, 0, 0, 0, 0, 15,
+    //     15, 15, 81, 9, 9, 81, 15, 15,
+    // ];
 
-    globals.rows = 8;
-    globals.cols = 8;
+    // grid size in cells
+    globals.rows = 64;
+    globals.cols = 64;
 
-    console.assert(globals.grid.length == (globals.rows * globals.cols));
+    // grid size in texels
+    globals.w = globals.cols * globals.size;
+    globals.h = globals.rows * globals.size;
+
+    // console.assert(globals.grid.length == (globals.rows * globals.cols));
 
     const half = globals.size / 2;
 
@@ -831,7 +834,11 @@ function initBuffers2dView(gl) {
             const x = col * globals.size + half;
             const y = row * globals.size + half;
 
-            globals.grid[i] *= 1 + 2 * 0;
+            if ((row == 0) || (row == (globals.rows - 1)) || (col == 0) || (col == (globals.cols - 1))) {
+                globals.grid.push(15);
+            } else {
+                globals.grid.push(0);
+            }
 
             switch (globals.grid[i]) {
                 case 0:
@@ -1082,7 +1089,7 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
-    const fov = HalfPI / 2;                   // field of view
+    const fov = HalfPI / 2; // field of view
     console.assert((0.0 < fov) && (fov < Math.PI));
     const count = globals.canvas3d.width; // number of rays
 
@@ -1345,10 +1352,12 @@ function draw2dScene(gl, programInfo, buffers) {
 
     gl.useProgram(programInfo.program);
 
+    // cell point size
+    const pointSize = Math.max(1, (globals.size / globals.w) * globals.canvas2d.width - 1);
+
     // draw walls
     {
         const fragColor = [0.0, 0.0, 1.0, 1.0];
-        const pointSize = globals.size - 1;
         draw2dElement(gl, buffers.walls, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
@@ -1356,7 +1365,6 @@ function draw2dScene(gl, programInfo, buffers) {
     {
         const rgb = (127 + 32 - 16) / 255;
         const fragColor = [rgb, rgb, rgb, 1.0];
-        const pointSize = globals.size - 1;
         draw2dElement(gl, buffers.cells, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
