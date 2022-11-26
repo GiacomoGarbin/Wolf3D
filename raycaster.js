@@ -373,8 +373,8 @@ function main() {
             draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
         }
 
-        updateTexture(gl3d);
-        draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
+        // updateTexture(gl3d);
+        // draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
 
         requestAnimationFrame(render);
     }
@@ -1310,8 +1310,35 @@ function draw3dScene(gl, buffers, programInfo, texture) {
     }
 }
 
-function draw2dScene(gl, programInfo, buffers) {
+function draw2dElement(gl, buffer, programInfo, fragColor, pointSize, mode) {
+    const numComponents = 2;
+    const type = gl.FLOAT;
+    const normalize = false;
+    const stride = 0;
+    const offset = 0;
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer.buffer);
+
+    gl.vertexAttribPointer(
+        programInfo.attribLocations.vertexPosition,
+        numComponents,
+        type,
+        normalize,
+        stride,
+        offset
+    );
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+    gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(fragColor));
+
+    if (pointSize != null) {
+        gl.uniform1f(programInfo.uniformLocations.uPointSize, pointSize);
+    }
+
+    gl.drawArrays(mode, 0, buffer.count);
+}
+
+function draw2dScene(gl, programInfo, buffers) {
     const rgb = (127 - 32 - 16) / 255;
     gl.clearColor(rgb, rgb, rgb, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1319,172 +1346,39 @@ function draw2dScene(gl, programInfo, buffers) {
     gl.useProgram(programInfo.program);
 
     // draw walls
-
     {
-        const numComponents = 2;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.walls.buffer);
-        gl.vertexAttribPointer(
-            programInfo.attribLocations.vertexPosition,
-            numComponents,
-            type,
-            normalize,
-            stride,
-            offset
-        );
-        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-    }
-
-    {
-        const color = [0.0, 0.0, 1.0, 1.0];
-        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, globals.size - 1);
-    }
-
-    {
-        const mode = gl.POINTS;
-        const first = 0;
-        const count = buffers.walls.count;
-        gl.drawArrays(mode, first, count);
+        const fragColor = [0.0, 0.0, 1.0, 1.0];
+        const pointSize = globals.size - 1;
+        draw2dElement(gl, buffers.walls, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
     // draw floor
-
-    {
-        const numComponents = 2;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.cells.buffer);
-        gl.vertexAttribPointer(
-            programInfo.attribLocations.vertexPosition,
-            numComponents,
-            type,
-            normalize,
-            stride,
-            offset
-        );
-        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-    }
-
     {
         const rgb = (127 + 32 - 16) / 255;
-        const color = [rgb, rgb, rgb, 1.0];
-        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, globals.size - 1);
-    }
-
-    {
-        const mode = gl.POINTS;
-        const first = 0;
-        const count = buffers.cells.count;
-        gl.drawArrays(mode, first, count);
+        const fragColor = [rgb, rgb, rgb, 1.0];
+        const pointSize = globals.size - 1;
+        draw2dElement(gl, buffers.cells, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
     // draw rays
-
     {
-        const numComponents = 2;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.rays.buffer);
-        gl.vertexAttribPointer(
-            programInfo.attribLocations.vertexPosition,
-            numComponents,
-            type,
-            normalize,
-            stride,
-            offset
-        );
-        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+        const fragColor = [1.0, 0.0, 1.0, 1.0];
+        const pointSize = null;
+        draw2dElement(gl, buffers.rays, programInfo, fragColor, pointSize, gl.LINES);
     }
 
+    // draw hit points
     {
-        const color = [1.0, 0.0, 1.0, 1.0];
-        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-    }
-
-    {
-        const mode = gl.LINES;
-        const first = 0;
-        const count = buffers.rays.count;
-        gl.drawArrays(mode, first, count);
+        const fragColor = [0.0, 1.0, 1.0, 1.0];
+        const pointSize = 2;
+        draw2dElement(gl, buffers.points, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
     // draw player
-
     {
-        const numComponents = 2;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.player.buffer);
-        gl.vertexAttribPointer(
-            programInfo.attribLocations.vertexPosition,
-            numComponents,
-            type,
-            normalize,
-            stride,
-            offset
-        );
-        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-    }
-
-    {
-        const color = [1.0, 1.0, 0.0, 1.0];
-        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 5.0);
-    }
-
-    {
-        const mode = gl.POINTS;
-        const first = 0;
-        const count = buffers.player.count;
-        gl.drawArrays(mode, first, count);
-    }
-
-    // draw debug points
-
-    {
-        const numComponents = 2;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.points.buffer);
-        gl.vertexAttribPointer(
-            programInfo.attribLocations.vertexPosition,
-            numComponents,
-            type,
-            normalize,
-            stride,
-            offset
-        );
-        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-    }
-
-    {
-        const color = [0.0, 1.0, 1.0, 1.0];
-        gl.uniform4fv(programInfo.uniformLocations.uFragColor, new Float32Array(color));
-
-        gl.uniform1f(programInfo.uniformLocations.uPointSize, 2.0);
-    }
-
-    {
-        const mode = gl.POINTS;
-        const first = 0;
-        const count = buffers.points.count;
-        gl.drawArrays(mode, first, count);
+        const fragColor = [1.0, 1.0, 0.0, 1.0];
+        const pointSize = 5;
+        draw2dElement(gl, buffers.player, programInfo, fragColor, pointSize, gl.POINTS);
     }
 }
 
