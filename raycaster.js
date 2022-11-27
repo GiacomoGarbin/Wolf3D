@@ -276,6 +276,7 @@ function main() {
     let gl3d = init3d();
 
     // init player position and direction
+    // TODO: read player spawn position from level.plane[1]
     // globals.x = globals.w / 2;
     // globals.y = globals.h / 2;
     globals.x = 28 * globals.size + (globals.size / 2);
@@ -471,39 +472,6 @@ function updateTexture(gl3d) {
         }
     }
 
-    // const texture = [
-    //     1, 1, 0, 0, 0, 0, 0, 0,
-    //     1, 1, 1, 1, 0, 0, 0, 0,
-    //     1, 1, 1, 1, 1, 1, 0, 0,
-    //     1, 1, 1, 1, 1, 1, 1, 1,
-    //     1, 1, 1, 1, 1, 1, 1, 1,
-    //     1, 1, 1, 1, 1, 1, 0, 0,
-    //     1, 1, 1, 1, 0, 0, 0, 0,
-    //     1, 1, 0, 0, 0, 0, 0, 0,
-    // ];
-
-    // const texture = [
-    //     0, 0, 0, 1, 1, 0, 0, 0,
-    //     0, 0, 0, 1, 1, 0, 0, 0,
-    //     0, 0, 1, 1, 1, 1, 0, 0,
-    //     0, 0, 1, 1, 1, 1, 0, 0,
-    //     0, 1, 1, 1, 1, 1, 1, 0,
-    //     0, 1, 1, 1, 1, 1, 1, 0,
-    //     1, 1, 1, 1, 1, 1, 1, 1,
-    //     1, 1, 1, 1, 1, 1, 1, 1,
-    // ];
-
-    const texture = [
-        0, 1, 0, 1, 0, 1, 0, 1,
-        1, 0, 1, 0, 1, 0, 1, 0,
-        0, 1, 0, 1, 0, 1, 0, 1,
-        1, 0, 1, 0, 1, 0, 1, 0,
-        0, 1, 0, 1, 0, 1, 0, 1,
-        1, 0, 1, 0, 1, 0, 1, 0,
-        0, 1, 0, 1, 0, 1, 0, 1,
-        1, 0, 1, 0, 1, 0, 1, 0,
-    ];
-
     const tw = 64;
     const th = 64;
 
@@ -516,8 +484,8 @@ function updateTexture(gl3d) {
             continue;
         }
 
-        // column height
-        const scale = globals.size * 318.5;
+        // pixels column height
+        const scale = globals.size * 318.5; // TODO: scale based on 3D canvas aspect ratio
         const height = Math.round(scale / hit.distance) * 2;
 
         if (height == 0) {
@@ -549,32 +517,22 @@ function updateTexture(gl3d) {
             const j = tx * tw + ty;
             console.assert((0 <= j) && (j < tw * th));
 
-            // const t = texture[j] * (hit.bVerOrHor ? 127 : 255);
-
-            // const r = 0;
-            // const g = t;
-            // const b = hit.bVerOrHor ? 127 : 255;
-
+            // draw uv [0-1]
             // const r = u * 255;
             // const g = v * 255;
             // const b = 0;
 
+            // draw texel coords [0-255]
             // const r = Math.min(tx * 4, 255);
             // const g = Math.min(ty * 4, 255);
             // const b = 0;
 
-            let color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
-            // let color = getPaletteColor(globals.i + (hit.bVerOrHor ? 1 : 0), j);
-
-            const scale = 0; // hit.bVerOrHor ? 1 : 0;
-            const r = color.r >> scale;
-            const g = color.g >> scale;
-            const b = color.b >> scale;
+            const color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
 
             const i = (row * w + col) * 4;
-            pixel[i + 0] = r;
-            pixel[i + 1] = g;
-            pixel[i + 2] = b;
+            pixel[i + 0] = color.r;
+            pixel[i + 1] = color.g;
+            pixel[i + 2] = color.b;
             pixel[i + 3] = 255;
         }
     }
