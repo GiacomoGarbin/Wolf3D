@@ -79,11 +79,19 @@ function loadPalette(buffer) {
 }
 
 function loadMapHead(buffer) {
-    const RLEW = new Uint16Array(buffer.slice(0, 2));
-    console.assert(RLEW == 0xABCD);
+    // TODO: use DataView
+    // TODO: compare with vpoupet
 
-    globals.offsets = new Uint32Array(buffer.slice(2, 2 + 100 * 4));
-    console.assert(globals.offsets != null);
+    // const RLEW = new Uint16Array(buffer.slice(0, 2));
+    // console.assert(RLEW == 0xABCD);
+
+    // globals.offsets = new Uint32Array(buffer.slice(2, 2 + 100 * 4));
+    // console.assert(globals.offsets != null);
+
+    const view = new DataView(buffer);
+    console.assert(view.getUint16(0, true) == 0xABCD);
+
+    globals.offsets = view;
 }
 
 function RLEW(view) {
@@ -134,41 +142,36 @@ function Carmack(view) {
 
     try {
         while (i < view.byteLength) {
-            const x = view[i];
-            const y = view[i + 1];
-            i += 2;
-
-            if ((x == 0) && ((y == 0xA7) || (y == 0xA8))) {
-                const z = view[i];
-
-                // should swap z and y ?
-                output.setUint8(j, z);
-                output.setUint8(j + 1, y);
-                j += 2;
-            } else if (y == 0xA7) { // near pointer
-                const z = view[i]; // offset in words (counted backwards from the current location in the output)
-                i += 1;
-
-                const word = output.getUint16(j - z * 2, true);
-
-                for (let k = 0; k < x; ++k) {
-                    output.setUint16(j, word, true);
+            const x = view.getUint8(i + 1);
+            if ((x == 0xA7) || (x == 0xA8)) { // possibly a pointer
+                const n = view.getUint8(i);
+                if (n == 0) { // exception (not really a pointer)
+                    const y = view.getUint8(i + 2);
+                    output.setUint8(j, y);
+                    output.setUint8(j + 1, x);
+                    i += 3;
                     j += 2;
-                }
-
-            } else if (y == 0xA8) { // far pointer
-                const z = view.getUint16(i, true); // absolute offset in words from which the repeated sequence starts
-                i += 2;
-
-                for (let k = 0; k < x; ++k) {
-                    const word = output.getUint16(z + k * 2, true);
-                    output.setUint16(j, word, true);
-                    j += 2;
+                } else if (x == 0xA7) { // near pointer
+                    const offset = 2 * view.getUint8(i + 2);
+                    for (let k = 0; k < n; ++k) {
+                        const word = output.getUint16(j - offset, true);
+                        output.setUint16(j, word, true);
+                        j += 2;
+                    }
+                    i += 3;
+                } else { // far pointer
+                    const offset = 2 * view.getUint16(i + 2, true);
+                    for (let k = 0; k < n; ++k) {
+                        const word = view.getUint16(offset + 2 * k, true);
+                        output.setUint16(j, word, true);
+                        j += 2;
+                    }
+                    i += 4
                 }
             } else {
-                // should swap x and y ?
-                output.setUint8(j, x);
-                output.setUint8(j + 1, y);
+                const word = view.getUint16(i, true);
+                output.setUint16(j, word, true);
+                i += 2;
                 j += 2;
             }
         }
@@ -180,112 +183,218 @@ function Carmack(view) {
     return output;
 }
 
-function loadGameMaps(buffer) {
-    // the decompressed data for each plane should be 8192 bytes long
+function loadLevel(buffer, level) {
+    let mapHeadView = globals.offsets;
+    let offset = mapHeadView.getUint32(2 + 4 * level, true);
+    let mapHeader = new DataView(buffer, offset, 42);
+    let plane0View = new DataView(
+        buffer,
+        mapHeader.getUint32(0, true),
+        mapHeader.getUint16(12, true),
+    );
+    plane0 = rlewDecode(carmackDecode(plane0View));
+    let plane1View = new DataView(
+        buffer,
+        mapHeader.getUint32(4, true),
+        mapHeader.getUint16(14, true),
+    );
+    plane1 = rlewDecode(carmackDecode(plane1View));
+    plane2 = [];
+    for (let i = 0; i < 64; i++) {
+        let line = Array(64);
+        line.fill(false);
+        plane2.push(line);
+    }
+    return [plane0, plane1, plane2];
+}
 
+function rlewDecode(inView) {
+    let rlewTag = 0xABCD;
+    let size = inView.getUint16(0, true);
+    let buffer = new ArrayBuffer(size);
+    let outView = new DataView(buffer);
+    let inOffset = 2;
+    let outOffset = 0;
+
+    while (inOffset < inView.byteLength) {
+        let w = inView.getUint16(inOffset, true);
+        inOffset += 2;
+        if (w === rlewTag) {
+            let n = inView.getUint16(inOffset, true);
+            let x = inView.getUint16(inOffset + 2, true);
+            inOffset += 4;
+            for (let i = 0; i < n; i++) {
+                outView.setUint16(outOffset, x, true);
+                outOffset += 2;
+            }
+        } else {
+            outView.setUint16(outOffset, w, true);
+            outOffset += 2;
+        }
+    }
+    return outView;
+}
+
+function carmackDecode(inView) {
+    let size = inView.getUint16(0, true);
+    let buffer = new ArrayBuffer(size);
+    let outView = new DataView(buffer);
+    let inOffset = 2;
+    let outOffset = 0;
+
+    while (inOffset < inView.byteLength) {
+        let x = inView.getUint8(inOffset + 1);
+        if (x === 0xA7 || x === 0xA8) {
+            // possibly a pointer
+            let n = inView.getUint8(inOffset);
+            if (n === 0) {
+                // exception (not really a pointer)
+                outView.setUint8(outOffset, inView.getUint8(inOffset + 2));
+                outView.setUint8(outOffset + 1, x);
+                inOffset += 3;
+                outOffset += 2;
+            } else if (x === 0xA7) {
+                // near pointer
+                let offset = 2 * inView.getUint8(inOffset + 2);
+                for (let i = 0; i < n; i++) {
+                    outView.setUint16(outOffset, outView.getUint16(outOffset - offset, true), true);
+                    outOffset += 2;
+                }
+                inOffset += 3;
+            } else {
+                // far pointer
+                let offset = 2 * inView.getUint16(inOffset + 2, true);
+                for (let i = 0; i < n; i++) {
+                    outView.setUint16(outOffset, outView.getUint16(offset + 2 * i, true), true);
+                    outOffset += 2;
+                }
+                inOffset += 4
+            }
+        } else {
+            // not a pointer
+            outView.setUint16(outOffset, inView.getUint16(inOffset, true), true);
+            inOffset += 2;
+            outOffset += 2;
+        }
+    }
+    return outView;
+}
+
+function loadGameMaps(buffer) {
     for (let i = 0; i < 60; ++i) {
         let level = {
             header: null,
             planes: [],
         };
 
-        // ========== HEADER ==========
-
-        // level map header, 42 bytes
-        let header = {
-            planes: [],
-            width: 0,
-            height: 0,
-            name: null,
-        };
-
-        // plane 0, 1 and 2 offsets
-        let offset = globals.offsets[i];
-        let size = 3 * 4;
-        const offsets = new Uint32Array(buffer.slice(offset, offset + size));
-
-        // plane 0, 1 and 2 sizes
-        offset += size;
-        size = 3 * 2;
-        const sizes = new Uint16Array(buffer.slice(offset, offset + size));
-
-        for (let j = 0; j < 3; ++j) {
-            const plane = {
-                offset: offsets[j],
-                size: sizes[j],
-            }
-            header.planes.push(plane);
-        }
-
-        // grid width and height, always 64x64
-        offset += size;
-        size = 2 * 2;
-        const grid = new Uint16Array(buffer.slice(offset, offset + size));
-
-        header.width = grid[0];
-        header.height = grid[1];
-        console.assert((header.width == 64) && (header.height == 64));
-
-        // map name
-        offset += size;
-        size = 16;
-        const name = new Uint8Array(buffer.slice(offset, offset + size));
-
-        header.name = new TextDecoder().decode(name);
-
-        level.header = header;
-
-        // ========== PLANES ==========
-
-        for (let j = 0; j < 3; ++j) {
-            const offset = header.planes[j].offset;
-            const size = header.planes[j].size;
-
-            if ((offset % 2) != 0) {
-                console.warn("plane " + j + " offset of level " + i + " is odd", header);
-            }
-
-            if ((size % 2) != 0) {
-                console.error("plane " + j + " size of level " + i + " is odd, SKIP LEVEL!", header);
-                continue;
-            }
-
-            // let data = buffer.slice(offset, offset + size);
-            let data = new DataView(buffer.slice(offset, offset + size));
-
-            // try RLEW decode data
-            data = RLEW(data);
-
-            if (data == null) {
-                console.error("plane " + j + " failed to RLEW decode of level " + i + ", SKIP LEVEL!", header);
-                continue;
-            }
-
-            // try Carmack decode data
-            data = Carmack(data);
-
-            if (data == null) {
-                console.error("plane " + j + " failed to Carmack decode of level " + i + ", SKIP LEVEL!", header);
-                continue;
-            }
-
-            if (j == 0) {
-                // ========== PLANE 0 ==========
-
-                // 000 - 063	Walls
-                // 090 - 091	Regular unlocked door(oriented)
-                // 092 - 093	Gold - locked door(oriented)
-                // 094 - 095	Silver - locked door(oriented)
-                // 100 - 101	Elevator door(oriented)
-                // 106 - 143	Walkable tile(room)
-            }
-
-            level.planes[j] = data;
-        }
-
+        level.planes = loadLevel(buffer, i);
         globals.levels.push(level);
     }
 }
+
+// function loadGameMaps(buffer) {
+//     // the decompressed data for each plane should be 8192 bytes long
+
+//     for (let i = 0; i < 60; ++i) {
+//         let level = {
+//             header: null,
+//             planes: [],
+//         };
+
+//         // ========== HEADER ==========
+
+//         // level map header, 42 bytes
+//         let header = {
+//             planes: [],
+//             width: 0,
+//             height: 0,
+//             name: null,
+//         };
+
+//         // plane 0, 1 and 2 offsets
+//         let offset = globals.offsets.getUint32(2 + i * 4, true); // globals.offsets[i];
+//         let size = 3 * 4;
+//         const offsets = new Uint32Array(buffer.slice(offset, offset + size));
+
+//         // plane 0, 1 and 2 sizes
+//         offset += size;
+//         size = 3 * 2;
+//         const sizes = new Uint16Array(buffer.slice(offset, offset + size));
+
+//         for (let j = 0; j < 3; ++j) {
+//             const plane = {
+//                 offset: offsets[j],
+//                 size: sizes[j],
+//             }
+//             header.planes.push(plane);
+//         }
+
+//         // grid width and height, always 64x64
+//         offset += size;
+//         size = 2 * 2;
+//         const grid = new Uint16Array(buffer.slice(offset, offset + size));
+
+//         header.width = grid[0];
+//         header.height = grid[1];
+//         console.assert((header.width == 64) && (header.height == 64));
+
+//         // map name
+//         offset += size;
+//         size = 16;
+//         const name = new Uint8Array(buffer.slice(offset, offset + size));
+
+//         header.name = new TextDecoder().decode(name);
+
+//         level.header = header;
+
+//         // ========== PLANES ==========
+
+//         for (let j = 0; j < 3; ++j) {
+//             const offset = header.planes[j].offset;
+//             const size = header.planes[j].size;
+
+//             level.planes.push(null);
+
+//             if ((offset % 2) != 0) {
+//                 console.warn("plane " + j + " offset of level " + i + " is odd", header);
+//             }
+
+//             if ((size % 2) != 0) {
+//                 console.error("plane " + j + " size of level " + i + " is odd, SKIP LEVEL!", header);
+//                 continue;
+//             }
+
+//             // let data = buffer.slice(offset, offset + size);
+//             let data = new DataView(buffer.slice(offset, offset + size));
+
+//             // try RLEW decode data
+//             data = RLEW(data);
+
+//             if (data == null) {
+//                 console.error("plane " + j + " failed to RLEW decode of level " + i + ", SKIP LEVEL!", header);
+//                 continue;
+//             }
+
+//             // try Carmack decode data
+//             data = Carmack(data);
+
+//             if (data == null) {
+//                 console.error("plane " + j + " failed to Carmack decode of level " + i + ", SKIP LEVEL!", header);
+//                 continue;
+//             }
+
+//             if (j == 0) {
+//                 console.log(i, data);
+//             }
+
+//             level.planes[j] = data;
+//         }
+
+//         globals.levels.push(level);
+//     }
+
+//     console.assert(globals.levels.length == 60);
+// }
 
 function markLoadDone(loaders, name) {
     for (let loader of loaders) {
@@ -339,9 +448,9 @@ function main() {
     // init player position and direction
     // globals.x = globals.w / 2;
     // globals.y = globals.h / 2;
-    globals.x = globals.size + (globals.size / 2);
-    globals.y = globals.size + (globals.size / 2);
-    globals.angle = -Math.PI / 2;
+    globals.x = 28 * globals.size + (globals.size / 2);
+    globals.y = 57 * globals.size + (globals.size / 2);
+    globals.angle = 0;
 
     // bind keyboard events
     document.onkeydown = shortcuts;
@@ -371,8 +480,8 @@ function main() {
             draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
         }
 
-        // updateTexture(gl3d);
-        // draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
+        updateTexture(gl3d);
+        draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
 
         requestAnimationFrame(render);
     }
@@ -624,7 +733,7 @@ function updateTexture(gl3d) {
             // const g = Math.min(ty * 4, 255);
             // const b = 0;
 
-            let color = getPaletteColor((hit.ct - 1) + (hit.bVerOrHor ? 1 : 0), j);
+            let color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
             // let color = getPaletteColor(globals.i + (hit.bVerOrHor ? 1 : 0), j);
 
             const scale = 0; // hit.bVerOrHor ? 1 : 0;
@@ -700,7 +809,7 @@ function rotate(vertex, angle) {
 
 function processInput(dt) {
     // double the speed by pressing SHIFT and modulate with dt
-    let step = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.05;
+    let step = (globals.keys[KEY_SHIFT] ? 8 : 4) * dt * 0.05;
 
     let n = 0;
     n += (globals.keys[KEY_W] ? 1 : 0);
@@ -766,7 +875,7 @@ function processInput(dt) {
     globals.y = Math.min(globals.y, globals.w - 1);
 
     // double the speed by pressing SHIFT and modulate with dt
-    const theta = (globals.keys[KEY_SHIFT] ? 2 : 1) * dt * 0.0025;
+    const theta = (globals.keys[KEY_SHIFT] ? 1 : 0.5) * dt * 0.0025;
 
     // rotate left
     if (globals.keys[KEY_A]) {
@@ -801,17 +910,6 @@ function debugViewToNDC(vertices) {
 }
 
 function initBuffers2dView(gl) {
-    // globals.grid = [
-    //     15, 15, 81, 9, 13, 81, 15, 15,
-    //     15, 0, 0, 0, 0, 0, 0, 15,
-    //     81, 0, 1, 0, 0, 1, 0, 81,
-    //     9, 0, 0, 0, 0, 0, 0, 9,
-    //     9, 0, 0, 0, 0, 0, 0, 9,
-    //     81, 0, 1, 0, 0, 1, 0, 81,
-    //     15, 0, 0, 0, 0, 0, 0, 15,
-    //     15, 15, 81, 9, 9, 81, 15, 15,
-    // ];
-
     // grid size in cells
     globals.rows = 64;
     globals.cols = 64;
@@ -819,8 +917,6 @@ function initBuffers2dView(gl) {
     // grid size in texels
     globals.w = globals.cols * globals.size;
     globals.h = globals.rows * globals.size;
-
-    // console.assert(globals.grid.length == (globals.rows * globals.cols));
 
     const half = globals.size / 2;
 
@@ -834,11 +930,44 @@ function initBuffers2dView(gl) {
             const x = col * globals.size + half;
             const y = row * globals.size + half;
 
-            if ((row == 0) || (row == (globals.rows - 1)) || (col == 0) || (col == (globals.cols - 1))) {
-                globals.grid.push(15);
-            } else {
-                globals.grid.push(0);
+            // if ((row == 0) || (row == (globals.rows - 1)) || (col == 0) || (col == (globals.cols - 1))) {
+            //     globals.grid.push(15);
+            // } else {
+            //     globals.grid.push(0);
+            // }
+
+            // read value from level map
+
+            const level = globals.levels[0];
+            if (level != null) {
+                const plane = level.planes[0];
+                console.assert((plane.byteLength / 2) == (64 * 64));
+
+                const cell = plane.getUint16(i * 2, true);
+
+                if ((0 <= cell) && (cell <= 63)) {
+                    globals.grid.push(cell);
+                    // } else if ((90 <= cell) && (cell <= 91)) {
+                    //     globals.grid.push(1);
+                    // } else if ((92 <= cell) && (cell <= 93)) {
+                    //     globals.grid.push(2);
+                    // } else if ((94 <= cell) && (cell <= 95)) {
+                    //     globals.grid.push(3);
+                    // } else if ((100 <= cell) && (cell <= 101)) {
+                    //     globals.grid.push(4);
+                    // } else if ((106 <= cell) && (cell <= 143)) {
+                    //     globals.grid.push(5);
+                } else {
+                    globals.grid.push(0);
+                }
             }
+
+            // 000 - 063	Walls
+            // 090 - 091	Regular unlocked door(oriented)
+            // 092 - 093	Gold - locked door(oriented)
+            // 094 - 095	Silver - locked door(oriented)
+            // 100 - 101	Elevator door(oriented)
+            // 106 - 143	Walkable tile(room)
 
             switch (globals.grid[i]) {
                 case 0:
