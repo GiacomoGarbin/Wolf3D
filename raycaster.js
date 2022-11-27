@@ -26,7 +26,6 @@ let globals = {
     palette: [],
     offsets: null,
     levels: [],
-    // i: 0,
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -94,10 +93,8 @@ function loadMapHead(buffer) {
     globals.offsets = view;
 }
 
-function RLEW(view) {
+function rlew(view) {
     const token = 0xABCD;
-
-    // const view = new DataView(data);
     const size = view.getUint16(0, true); // decoded data byte size
 
     let buffer = new ArrayBuffer(size);
@@ -124,14 +121,13 @@ function RLEW(view) {
             }
         }
     } catch (error) {
-        // console.warn("decode failed");
         return null;
     }
 
     return output;
 }
 
-function Carmack(view) {
+function carmack(view) {
     const size = view.getUint16(0, true); // decoded data byte size
 
     let buffer = new ArrayBuffer(size);
@@ -162,7 +158,7 @@ function Carmack(view) {
                 } else { // far pointer
                     const offset = 2 * view.getUint16(i + 2, true);
                     for (let k = 0; k < n; ++k) {
-                        const word = view.getUint16(offset + 2 * k, true);
+                        const word = output.getUint16(offset + 2 * k, true);
                         output.setUint16(j, word, true);
                         j += 2;
                     }
@@ -176,225 +172,59 @@ function Carmack(view) {
             }
         }
     } catch (error) {
-        // console.warn("decode failed");
         return null;
     }
 
     return output;
 }
 
-function loadLevel(buffer, level) {
-    let mapHeadView = globals.offsets;
-    let offset = mapHeadView.getUint32(2 + 4 * level, true);
-    let mapHeader = new DataView(buffer, offset, 42);
-    let plane0View = new DataView(
+function decode(view) {
+    // @vpoupet: "each plane data is compressed by RLEW compression followed by Carmack compression"
+    // so we need first decode Carmack and then decode RLEW
+    return rlew(carmack(view));
+}
+
+function loadLevel(buffer, i) {
+    let level = {
+        header: null,
+        planes: new Array(3),
+    };
+
+    const offset = globals.offsets.getUint32(2 + 4 * i, true);
+    level.header = new DataView(buffer, offset, 42);
+
+    let view = undefined;
+
+    view = new DataView(
         buffer,
-        mapHeader.getUint32(0, true),
-        mapHeader.getUint16(12, true),
+        level.header.getUint32(0, true),
+        level.header.getUint16(12, true),
     );
-    plane0 = rlewDecode(carmackDecode(plane0View));
-    let plane1View = new DataView(
+    level.planes[0] = decode(view);
+
+    view = new DataView(
         buffer,
-        mapHeader.getUint32(4, true),
-        mapHeader.getUint16(14, true),
+        level.header.getUint32(4, true),
+        level.header.getUint16(14, true),
     );
-    plane1 = rlewDecode(carmackDecode(plane1View));
-    plane2 = [];
+    level.planes[1] = decode(view);
+
+    level.planes[2] = [];
     for (let i = 0; i < 64; i++) {
-        let line = Array(64);
-        line.fill(false);
-        plane2.push(line);
+        let row = Array(64);
+        row.fill(false);
+        level.planes[2].push(row);
     }
-    return [plane0, plane1, plane2];
-}
 
-function rlewDecode(inView) {
-    let rlewTag = 0xABCD;
-    let size = inView.getUint16(0, true);
-    let buffer = new ArrayBuffer(size);
-    let outView = new DataView(buffer);
-    let inOffset = 2;
-    let outOffset = 0;
-
-    while (inOffset < inView.byteLength) {
-        let w = inView.getUint16(inOffset, true);
-        inOffset += 2;
-        if (w === rlewTag) {
-            let n = inView.getUint16(inOffset, true);
-            let x = inView.getUint16(inOffset + 2, true);
-            inOffset += 4;
-            for (let i = 0; i < n; i++) {
-                outView.setUint16(outOffset, x, true);
-                outOffset += 2;
-            }
-        } else {
-            outView.setUint16(outOffset, w, true);
-            outOffset += 2;
-        }
-    }
-    return outView;
-}
-
-function carmackDecode(inView) {
-    let size = inView.getUint16(0, true);
-    let buffer = new ArrayBuffer(size);
-    let outView = new DataView(buffer);
-    let inOffset = 2;
-    let outOffset = 0;
-
-    while (inOffset < inView.byteLength) {
-        let x = inView.getUint8(inOffset + 1);
-        if (x === 0xA7 || x === 0xA8) {
-            // possibly a pointer
-            let n = inView.getUint8(inOffset);
-            if (n === 0) {
-                // exception (not really a pointer)
-                outView.setUint8(outOffset, inView.getUint8(inOffset + 2));
-                outView.setUint8(outOffset + 1, x);
-                inOffset += 3;
-                outOffset += 2;
-            } else if (x === 0xA7) {
-                // near pointer
-                let offset = 2 * inView.getUint8(inOffset + 2);
-                for (let i = 0; i < n; i++) {
-                    outView.setUint16(outOffset, outView.getUint16(outOffset - offset, true), true);
-                    outOffset += 2;
-                }
-                inOffset += 3;
-            } else {
-                // far pointer
-                let offset = 2 * inView.getUint16(inOffset + 2, true);
-                for (let i = 0; i < n; i++) {
-                    outView.setUint16(outOffset, outView.getUint16(offset + 2 * i, true), true);
-                    outOffset += 2;
-                }
-                inOffset += 4
-            }
-        } else {
-            // not a pointer
-            outView.setUint16(outOffset, inView.getUint16(inOffset, true), true);
-            inOffset += 2;
-            outOffset += 2;
-        }
-    }
-    return outView;
+    return level;
 }
 
 function loadGameMaps(buffer) {
     for (let i = 0; i < 60; ++i) {
-        let level = {
-            header: null,
-            planes: [],
-        };
-
-        level.planes = loadLevel(buffer, i);
+        const level = loadLevel(buffer, i);
         globals.levels.push(level);
     }
 }
-
-// function loadGameMaps(buffer) {
-//     // the decompressed data for each plane should be 8192 bytes long
-
-//     for (let i = 0; i < 60; ++i) {
-//         let level = {
-//             header: null,
-//             planes: [],
-//         };
-
-//         // ========== HEADER ==========
-
-//         // level map header, 42 bytes
-//         let header = {
-//             planes: [],
-//             width: 0,
-//             height: 0,
-//             name: null,
-//         };
-
-//         // plane 0, 1 and 2 offsets
-//         let offset = globals.offsets.getUint32(2 + i * 4, true); // globals.offsets[i];
-//         let size = 3 * 4;
-//         const offsets = new Uint32Array(buffer.slice(offset, offset + size));
-
-//         // plane 0, 1 and 2 sizes
-//         offset += size;
-//         size = 3 * 2;
-//         const sizes = new Uint16Array(buffer.slice(offset, offset + size));
-
-//         for (let j = 0; j < 3; ++j) {
-//             const plane = {
-//                 offset: offsets[j],
-//                 size: sizes[j],
-//             }
-//             header.planes.push(plane);
-//         }
-
-//         // grid width and height, always 64x64
-//         offset += size;
-//         size = 2 * 2;
-//         const grid = new Uint16Array(buffer.slice(offset, offset + size));
-
-//         header.width = grid[0];
-//         header.height = grid[1];
-//         console.assert((header.width == 64) && (header.height == 64));
-
-//         // map name
-//         offset += size;
-//         size = 16;
-//         const name = new Uint8Array(buffer.slice(offset, offset + size));
-
-//         header.name = new TextDecoder().decode(name);
-
-//         level.header = header;
-
-//         // ========== PLANES ==========
-
-//         for (let j = 0; j < 3; ++j) {
-//             const offset = header.planes[j].offset;
-//             const size = header.planes[j].size;
-
-//             level.planes.push(null);
-
-//             if ((offset % 2) != 0) {
-//                 console.warn("plane " + j + " offset of level " + i + " is odd", header);
-//             }
-
-//             if ((size % 2) != 0) {
-//                 console.error("plane " + j + " size of level " + i + " is odd, SKIP LEVEL!", header);
-//                 continue;
-//             }
-
-//             // let data = buffer.slice(offset, offset + size);
-//             let data = new DataView(buffer.slice(offset, offset + size));
-
-//             // try RLEW decode data
-//             data = RLEW(data);
-
-//             if (data == null) {
-//                 console.error("plane " + j + " failed to RLEW decode of level " + i + ", SKIP LEVEL!", header);
-//                 continue;
-//             }
-
-//             // try Carmack decode data
-//             data = Carmack(data);
-
-//             if (data == null) {
-//                 console.error("plane " + j + " failed to Carmack decode of level " + i + ", SKIP LEVEL!", header);
-//                 continue;
-//             }
-
-//             if (j == 0) {
-//                 console.log(i, data);
-//             }
-
-//             level.planes[j] = data;
-//         }
-
-//         globals.levels.push(level);
-//     }
-
-//     console.assert(globals.levels.length == 60);
-// }
 
 function markLoadDone(loaders, name) {
     for (let loader of loaders) {
