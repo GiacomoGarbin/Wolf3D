@@ -264,8 +264,6 @@ function loadFile(name, func, next) {
     req.send(null);
 }
 
-let prev = -1;
-
 function getPaletteColor(i, j) {
     const k = globals.walls[i][j];
     return globals.palette[k];
@@ -277,8 +275,6 @@ function main() {
 
     // init player position and direction
     // TODO: read player spawn position from level.plane[1]
-    // globals.x = globals.w / 2;
-    // globals.y = globals.h / 2;
     globals.x = 28 * globals.size + (globals.size / 2);
     globals.y = 57 * globals.size + (globals.size / 2);
     globals.angle = 0;
@@ -527,7 +523,38 @@ function updateTexture(gl3d) {
             // const g = Math.min(ty * 4, 255);
             // const b = 0;
 
-            const color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
+            let color = { r: 0, g: 0, b: 0, };
+
+            if (isWall(hit.ct)) {
+                color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
+            } else if (isDoor(hit.ct)) {
+                let k = 0;
+                switch (hit.ct) {
+                    // vertical hit
+                    case 90:
+                        k = 99;
+                        break;
+                    case 92:
+                    case 94:
+                        k = 105;
+                        break;
+                    case 100:
+                        k = 103;
+                        break;
+                    // horizontal hit
+                    case 91:
+                        k = 98;
+                        break;
+                    case 93:
+                    case 95:
+                        k = 104;
+                        break;
+                    case 101:
+                        k = 102;
+                        break;
+                }
+                color = getPaletteColor(k, j);
+            }
 
             const i = (row * w + col) * 4;
             pixel[i + 0] = color.r;
@@ -566,11 +593,6 @@ function shortcuts(event) {
             }
         // case 38: // up
         // case 40: // down
-        //     if (event.type == "keydown") {
-        //         globals.i += (event.keyCode == 38) ? +2 : -2;
-        //         globals.i = Math.min(Math.max(0, globals.i), 100);
-        //         console.log(globals.i);
-        //     }
         //     break;
         default:
             {
@@ -645,13 +667,13 @@ function processInput(dt) {
     [px, py] = translate([px, py], [dx, dy]);
 
     // check wall collision
-    if (isEmpty(px, globals.y)) {
+    if (!isWall(getCell(px, globals.y))) {
         // apply translation
         globals.x = px;
     }
 
     // check wall collision
-    if (isEmpty(globals.x, py)) {
+    if (!isWall(getCell(globals.x, py))) {
         // apply translation
         globals.y = py;
     }
@@ -697,7 +719,22 @@ function debugViewToNDC(vertices) {
     return vertices.map((e, i) => (i % 2 == 0) ? (e / (w / 2) - 1) : (1 - (e / (h / 2))));
 }
 
+function createBuffer(gl, data) {
+    let buffer = gl.createBuffer();
+
+    // select the buffer to apply buffer operations to from here out
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    // transform position from grid space to NDC
+    data = debugViewToNDC(data);
+    // fill the current buffer
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+
+    return buffer;
+}
+
 function initBuffers2dView(gl) {
+    // TODO: detach game code/data from 2d debug view code
+
     // grid size in cells
     globals.rows = 64;
     globals.cols = 64;
@@ -706,49 +743,22 @@ function initBuffers2dView(gl) {
     globals.w = globals.cols * globals.size;
     globals.h = globals.rows * globals.size;
 
+    // level we are displaying
+    const level = globals.levels[0];
+    const plane = level.planes[0];
+    console.assert((plane.byteLength / 2) == (64 * 64));
+
     const half = globals.size / 2;
 
     let walls = [];
-    let cells = [];
+    let doors = [];
+    let empty = [];
 
     for (let row = 0; row < globals.rows; row++) {
         for (let col = 0; col < globals.cols; col++) {
             const i = row * globals.cols + col;
-
-            const x = col * globals.size + half;
-            const y = row * globals.size + half;
-
-            // if ((row == 0) || (row == (globals.rows - 1)) || (col == 0) || (col == (globals.cols - 1))) {
-            //     globals.grid.push(15);
-            // } else {
-            //     globals.grid.push(0);
-            // }
-
-            // read value from level map
-
-            const level = globals.levels[0];
-            if (level != null) {
-                const plane = level.planes[0];
-                console.assert((plane.byteLength / 2) == (64 * 64));
-
-                const cell = plane.getUint16(i * 2, true);
-
-                if ((0 <= cell) && (cell <= 63)) {
-                    globals.grid.push(cell);
-                    // } else if ((90 <= cell) && (cell <= 91)) {
-                    //     globals.grid.push(1);
-                    // } else if ((92 <= cell) && (cell <= 93)) {
-                    //     globals.grid.push(2);
-                    // } else if ((94 <= cell) && (cell <= 95)) {
-                    //     globals.grid.push(3);
-                    // } else if ((100 <= cell) && (cell <= 101)) {
-                    //     globals.grid.push(4);
-                    // } else if ((106 <= cell) && (cell <= 143)) {
-                    //     globals.grid.push(5);
-                } else {
-                    globals.grid.push(0);
-                }
-            }
+            const cell = plane.getUint16(i * 2, true);
+            globals.grid.push(cell);
 
             // 000 - 063	Walls
             // 090 - 091	Regular unlocked door(oriented)
@@ -757,50 +767,38 @@ function initBuffers2dView(gl) {
             // 100 - 101	Elevator door(oriented)
             // 106 - 143	Walkable tile(room)
 
-            switch (globals.grid[i]) {
-                case 0:
-                    cells.push(x, y);
-                    break;
-                default:
-                    walls.push(x, y);
-                    break;
+            const x = col * globals.size + half;
+            const y = row * globals.size + half;
+
+            if (cell <= 63) { // walls
+                walls.push(x, y);
+            } else if (cell <= 101) { // doors
+                doors.push(x, y);
+            } else { // empty cells
+                empty.push(x, y);
             }
         }
     }
 
-    // ========== walls ==========
-
-    const wallsBuffer = gl.createBuffer();
-
-    // select the buffer to apply buffer operations to from here out
-    gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
-
-    // position in NDC
-    walls = debugViewToNDC(walls)
-
-    // fill the current buffer
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(walls), gl.STATIC_DRAW);
-
-    // ========== cells ==========
-
-    const cellsBuffer = gl.createBuffer();
-
-    // select the buffer to apply buffer operations to from here out
-    gl.bindBuffer(gl.ARRAY_BUFFER, cellsBuffer);
-
-    // position in NDC
-    cells = debugViewToNDC(cells)
-
-    // fill the current buffer
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cells), gl.STATIC_DRAW);
-
-    return {
-        walls: { buffer: wallsBuffer, count: walls.length / 2, },
-        cells: { buffer: cellsBuffer, count: cells.length / 2, },
+    let buffers = {
+        walls: { buffer: null, count: 0, },
+        doors: { buffer: null, count: 0, },
+        empty: { buffer: null, count: 0, },
         player: { buffer: null, count: 0, },
         rays: { buffer: null, count: 0, },
         points: { buffer: null, count: 0, }
     };
+
+    buffers.walls.buffer = createBuffer(gl, walls);
+    buffers.walls.count = walls.length / 2;
+
+    buffers.doors.buffer = createBuffer(gl, doors);
+    buffers.doors.count = doors.length / 2;
+
+    buffers.empty.buffer = createBuffer(gl, empty);
+    buffers.empty.count = empty.length / 2;
+
+    return buffers;
 }
 
 function initBuffers3dView(gl) {
@@ -870,8 +868,19 @@ function getCell(px, py) {
     return globals.grid[i];
 }
 
+function isWall(ct) {
+    console.assert(ct >= 0);
+    return ct <= 63;
+}
+
+function isDoor(ct) {
+    console.assert(ct >= 0);
+    return !isWall(ct) && (ct <= 101);
+}
+
 function isEmpty(px, py) {
-    return getCell(px, py) == 0;
+    const ct = getCell(px, py);
+    return !isWall(ct) && !isDoor(ct);
 }
 
 function inGrid(px, py) {
@@ -889,12 +898,8 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
 
     if (!inGrid(px, py)) {
         return null;
-    } else {
-        const cell = getCell(px, py);
-
-        if (cell != 0) {
-            return { cell: cell, px: px, py: py, };
-        }
+    } else if (!isEmpty(px, py)) {
+        return { cell: getCell(px, py), px: px, py: py, };
     }
 
     // find first wall intersection
@@ -904,12 +909,8 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
 
         if (!inGrid(px, py)) {
             return null;
-        } else {
-            const cell = getCell(px, py);
-
-            if (cell != 0) {
-                return { cell: cell, px: px, py: py, };
-            }
+        } else if (!isEmpty(px, py)) {
+            return { cell: getCell(px, py), px: px, py: py, };
         }
     }
 }
@@ -989,6 +990,7 @@ function distance(px, py) {
 }
 
 function updateBuffers(gl, buffers) {
+    // TODO: detach game code/data from 2d debug view code
 
     // ========== player ==========
 
@@ -1117,7 +1119,8 @@ function updateBuffers(gl, buffers) {
 
     return {
         walls: buffers.walls,
-        cells: buffers.cells,
+        doors: buffers.doors,
+        empty: buffers.empty,
         player: { buffer: playerBuffer, count: player.length / 2, },
         rays: { buffer: raysBuffer, count: rays.length / 2, },
         points: { buffer: pointsBuffer, count: points.length / 2, }
@@ -1278,11 +1281,17 @@ function draw2dScene(gl, programInfo, buffers) {
         draw2dElement(gl, buffers.walls, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
-    // draw floor
+    // draw doors
+    {
+        const fragColor = [0.0, 1.0, 1.0, 1.0];
+        draw2dElement(gl, buffers.doors, programInfo, fragColor, pointSize, gl.POINTS);
+    }
+
+    // draw empty cells
     {
         const rgb = (127 + 32 - 16) / 255;
         const fragColor = [rgb, rgb, rgb, 1.0];
-        draw2dElement(gl, buffers.cells, programInfo, fragColor, pointSize, gl.POINTS);
+        draw2dElement(gl, buffers.empty, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
     // draw rays
