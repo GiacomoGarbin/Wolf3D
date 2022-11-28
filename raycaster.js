@@ -513,48 +513,17 @@ function updateTexture(gl3d) {
             const j = tx * tw + ty;
             console.assert((0 <= j) && (j < tw * th));
 
-            // draw uv [0-1]
-            // const r = u * 255;
-            // const g = v * 255;
-            // const b = 0;
+            let color = getPaletteColor(hit.ct, j);
 
-            // draw texel coords [0-255]
+            // // draw uv [0-1]
+            // color.r = u * 255;
+            // color.g = v * 255;
+            // color.b = 0;
+
+            // // draw texel coords [0-255]
             // const r = Math.min(tx * 4, 255);
             // const g = Math.min(ty * 4, 255);
             // const b = 0;
-
-            let color = { r: 0, g: 0, b: 0, };
-
-            if (isWall(hit.ct)) {
-                color = getPaletteColor(2 * hit.ct - (hit.bVerOrHor ? 1 : 2), j);
-            } else if (isDoor(hit.ct)) {
-                let k = 0;
-                switch (hit.ct) {
-                    // vertical hit
-                    case 90:
-                        k = 99;
-                        break;
-                    case 92:
-                    case 94:
-                        k = 105;
-                        break;
-                    case 100:
-                        k = 103;
-                        break;
-                    // horizontal hit
-                    case 91:
-                        k = 98;
-                        break;
-                    case 93:
-                    case 95:
-                        k = 104;
-                        break;
-                    case 101:
-                        k = 102;
-                        break;
-                }
-                color = getPaletteColor(k, j);
-            }
 
             const i = (row * w + col) * 4;
             pixel[i + 0] = color.r;
@@ -887,7 +856,118 @@ function inGrid(px, py) {
     return ((0.0 <= px) && (px < globals.w)) && ((0.0 <= py) && (py < globals.h));
 }
 
-function findAxisIntersection(theta, r, p, d, vs, hs) {
+function doWall(ct, px, py, bVerOrHor) {
+    return {
+        cell: 2 * ct - (bVerOrHor ? 1 : 2),
+        px: px,
+        py: py,
+        bVerOrHor: bVerOrHor,
+    };
+}
+
+function doDoor(ct, px, py, hs, vs, bVerOrHor) {
+    const dx = px + hs / 2;
+    const dy = py + vs / 2;
+
+    switch (ct) {
+        // vertical hit
+        case 90:
+            ct = 99;
+            break;
+        case 92:
+        case 94:
+            ct = 105;
+            break;
+        case 100: // ?
+            ct = 103;
+            break;
+        // horizontal hit
+        case 91:
+            ct = 98;
+            break;
+        case 93:
+        case 95:
+            ct = 104;
+            break;
+        case 101: // ?
+            ct = 102;
+            break;
+    }
+
+    let hit = null;
+
+    if (bVerOrHor) {
+        const cpy = Math.floor(py / globals.size) * globals.size;
+        const cdy = Math.floor(dy / globals.size) * globals.size;
+
+        const diff = cdy - cpy;
+
+        if (diff == 0) {
+            hit = {
+                cell: ct,
+                px: dx,
+                py: dy,
+                bVerOrHor: bVerOrHor,
+            };
+        } else {
+            let y = cpy;
+
+            if (diff > 0) {
+                y += 64 - 0.000001;
+            }
+
+            let m = (dy - py) / (dx - px);
+            // y = m*x + c => c = y - m*x
+            let c = py - m * px;
+            // y = m*x + c => x = (y - c) / m
+            let x = (y - c) / m;
+
+            hit = {
+                cell: 100,
+                px: x,
+                py: y,
+                bVerOrHor: !bVerOrHor,
+            };
+        }
+    } else {
+        const cpx = Math.floor(px / globals.size) * globals.size;
+        const cdx = Math.floor(dx / globals.size) * globals.size;
+
+        const diff = cdx - cpx;
+
+        if (diff == 0) {
+            hit = {
+                cell: ct,
+                px: dx,
+                py: dy,
+                bVerOrHor: bVerOrHor,
+            };
+        } else {
+            let x = cpx;
+
+            if (diff > 0) {
+                x += 64 - 0.000001;
+            }
+
+            let m = (dx - px) / (dy - py);
+            // y = m*x + c => c = y - m*x
+            let c = px - m * py;
+            // y = m*x + c => x = (y - c) / m
+            let y = (x - c) / m;
+
+            hit = {
+                cell: 101,
+                px: x,
+                py: y,
+                bVerOrHor: !bVerOrHor,
+            };
+        }
+    }
+
+    return hit;
+}
+
+function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
     let dx = Math.cos(theta);
     let dy = Math.sin(theta);
 
@@ -898,19 +978,29 @@ function findAxisIntersection(theta, r, p, d, vs, hs) {
 
     if (!inGrid(px, py)) {
         return null;
-    } else if (!isEmpty(px, py)) {
-        return { cell: getCell(px, py), px: px, py: py, };
+    } else {
+        const ct = getCell(px, py);
+        if (isWall(ct)) {
+            return doWall(ct, px, py, bVerOrHor);
+        } else if (isDoor(ct)) {
+            return doDoor(ct, px, py, hs, vs, bVerOrHor);
+        }
     }
 
-    // find first wall intersection
+    // find first wall or door intersection
     while (true) {
         px = px + hs;
         py = py + vs;
 
         if (!inGrid(px, py)) {
             return null;
-        } else if (!isEmpty(px, py)) {
-            return { cell: getCell(px, py), px: px, py: py, };
+        } else {
+            const ct = getCell(px, py);
+            if (isWall(ct)) {
+                return doWall(ct, px, py, bVerOrHor);
+            } else if (isDoor(ct)) {
+                return doDoor(ct, px, py, hs, vs, bVerOrHor);
+            }
         }
     }
 }
@@ -935,8 +1025,8 @@ function findVerticalIntersection(theta) {
     const cx = Math.floor(px / globals.size) * globals.size;
 
     // neighboring cells
-    const r = cx + globals.size // right
-    const l = cx - 0.00001      // left
+    const r = cx + globals.size; // right
+    const l = cx - 0.00001;      // left
 
     // ray point
     const rx = side ? l : r;
@@ -946,7 +1036,7 @@ function findVerticalIntersection(theta) {
     const vs = sign * globals.size * Math.tan(theta);
     const hs = sign * globals.size;
 
-    return findAxisIntersection(theta, rx, px, dx, vs, hs);
+    return findAxisIntersection(theta, rx, px, dx, vs, hs, true);
 }
 
 function findHorizontalIntersection(theta) {
@@ -969,8 +1059,8 @@ function findHorizontalIntersection(theta) {
     const cy = Math.floor(py / globals.size) * globals.size;
 
     // neighboring cells
-    const u = cy - 0.00001      // up
-    const d = cy + globals.size // down
+    const u = cy - 0.00001;      // up
+    const d = cy + globals.size; // down
 
     // ray point
     const ry = side ? d : u;
@@ -980,7 +1070,7 @@ function findHorizontalIntersection(theta) {
     const vs = sign * globals.size;
     const hs = sign * globals.size * Math.tan(HalfPI - theta);
 
-    return findAxisIntersection(theta, ry, py, dy, vs, hs);
+    return findAxisIntersection(theta, ry, py, dy, vs, hs, false);
 }
 
 function distance(px, py) {
@@ -1056,25 +1146,17 @@ function updateBuffers(gl, buffers) {
 
             if (d0 < d1) {
                 p = pv;
-
                 hit.distance = d0;
-                hit.bVerOrHor = true;
             } else {
                 p = ph;
-
                 hit.distance = d1;
-                hit.bVerOrHor = false;
             }
         } else if (pv != null) {
             p = pv;
-
             hit.distance = distance(pv.px, pv.py);
-            hit.bVerOrHor = true;
         } else if (ph != null) {
             p = ph;
-
             hit.distance = distance(ph.px, ph.py);
-            hit.bVerOrHor = false;
         }
 
         if (p != null) {
@@ -1090,6 +1172,7 @@ function updateBuffers(gl, buffers) {
             hit.px = p.px;
             hit.py = p.py;
             hit.ct = p.cell;
+            hit.bVerOrHor = p.bVerOrHor;
         } else {
             // ray to infinity
         }
@@ -1303,7 +1386,7 @@ function draw2dScene(gl, programInfo, buffers) {
 
     // draw hit points
     {
-        const fragColor = [0.0, 1.0, 1.0, 1.0];
+        const fragColor = [1.0, 1.0, 0.0, 1.0];
         const pointSize = 2;
         draw2dElement(gl, buffers.points, programInfo, fragColor, pointSize, gl.POINTS);
     }
