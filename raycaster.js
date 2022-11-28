@@ -500,6 +500,11 @@ function updateTexture(gl3d) {
         u = ((hit.bVerOrHor && !side) || (!hit.bVerOrHor && side)) ? (1 - u) : u;
         console.assert((0.0 <= u) && (u <= 1.0));
 
+        if (isDoor((hit.ct)) && !side) {
+            // display door handle at the same position regardless of the door side
+            u = 1 - u;
+        }
+
         const padding = (height - h) / 2;
 
         for (var row = row0; row < row1; ++row) {
@@ -857,12 +862,30 @@ function inGrid(px, py) {
 }
 
 function doWall(ct, px, py, bVerOrHor) {
-    return {
+    let hit = {
         cell: 2 * ct - (bVerOrHor ? 1 : 2),
         px: px,
         py: py,
         bVerOrHor: bVerOrHor,
     };
+
+    if (isDoor(getCell(globals.x, globals.y))) {
+        const cx = Math.floor(globals.x / globals.size);
+        const cy = Math.floor(globals.y / globals.size);
+
+        const cpx = Math.floor(px / globals.size);
+        const cpy = Math.floor(py / globals.size);
+
+        const a = Math.abs(cx - cpx);
+        const b = Math.abs(cy - cpy);
+
+        if (((a == 0) && (b == 1)) || ((a == 1) && (b == 0))) {
+            // display door side walls
+            hit.cell = bVerOrHor ? 100 : 101;
+        }
+    }
+
+    return hit;
 }
 
 function doDoor(ct, px, py, hs, vs, bVerOrHor) {
