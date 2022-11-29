@@ -37,6 +37,53 @@ let globals = {
     }
 }
 
+// cell type
+const CT_CELL = 0; // base class represents empty cells
+const CT_WALL = 1;
+const CT_DOOR = 2;
+
+class Cell {
+    constructor(textureIndex) {
+        this.textureIndex = textureIndex;
+    }
+
+    getType() {
+        return CT_CELL;
+    }
+
+    isWall() {
+        return this.getType() == CT_WALL;
+    }
+
+    isDoor() {
+        return this.getType() == CT_DOOR;
+    }
+
+    getTextureIndex() {
+        return this.textureIndex;
+    }
+};
+
+class Wall extends Cell {
+    constructor(textureIndex) {
+        super(textureIndex);
+    }
+
+    getType() {
+        return CT_WALL;
+    }
+};
+
+class Door extends Cell {
+    constructor(textureIndex) {
+        super(textureIndex);
+    }
+
+    getType() {
+        return CT_DOOR;
+    }
+};
+
 function loadAssets(buffer) {
     // TODO: add asserts
 
@@ -500,7 +547,7 @@ function updateTexture(gl3d) {
         u = ((hit.bVerOrHor && !side) || (!hit.bVerOrHor && side)) ? (1 - u) : u;
         console.assert((0.0 <= u) && (u <= 1.0));
 
-        if (isDoor((hit.ct)) && !side) {
+        if (hit.cell.isDoor() && !side) {
             // display door handle at the same position regardless of the door side
             u = 1 - u;
         }
@@ -518,7 +565,7 @@ function updateTexture(gl3d) {
             const j = tx * tw + ty;
             console.assert((0 <= j) && (j < tw * th));
 
-            let color = getPaletteColor(hit.ct, j);
+            let color = getPaletteColor(hit.textureIndex, j);
 
             // // draw uv [0-1]
             // color.r = u * 255;
@@ -641,13 +688,13 @@ function processInput(dt) {
     [px, py] = translate([px, py], [dx, dy]);
 
     // check wall collision
-    if (!isWall(getCell(px, globals.y))) {
+    if (!getCell(px, globals.y).isWall()) {
         // apply translation
         globals.x = px;
     }
 
     // check wall collision
-    if (!isWall(getCell(globals.x, py))) {
+    if (!getCell(globals.x, py).isWall()) {
         // apply translation
         globals.y = py;
     }
@@ -731,26 +778,25 @@ function initBuffers2dView(gl) {
     for (let row = 0; row < globals.rows; row++) {
         for (let col = 0; col < globals.cols; col++) {
             const i = row * globals.cols + col;
-            const cell = plane.getUint16(i * 2, true);
-            globals.grid.push(cell);
+            const tex = plane.getUint16(i * 2, true);
 
-            // 000 - 063	Walls
-            // 090 - 091	Regular unlocked door(oriented)
-            // 092 - 093	Gold - locked door(oriented)
-            // 094 - 095	Silver - locked door(oriented)
-            // 100 - 101	Elevator door(oriented)
-            // 106 - 143	Walkable tile(room)
+            let cell = undefined;
 
             const x = col * globals.size + half;
             const y = row * globals.size + half;
 
-            if (cell <= 63) { // walls
+            if (tex <= 63) { // walls
+                cell = new Wall(tex);
                 walls.push(x, y);
-            } else if (cell <= 101) { // doors
+            } else if (tex <= 101) { // doors
+                cell = new Door(tex);
                 doors.push(x, y);
             } else { // empty cells
+                cell = new Cell(tex);
                 empty.push(x, y);
             }
+
+            globals.grid.push(cell);
         }
     }
 
@@ -842,34 +888,26 @@ function getCell(px, py) {
     return globals.grid[i];
 }
 
-function isWall(ct) {
-    console.assert(ct >= 0);
-    return ct <= 63;
-}
-
-function isDoor(ct) {
-    console.assert(ct >= 0);
-    return !isWall(ct) && (ct <= 101);
-}
-
 function isEmpty(px, py) {
-    const ct = getCell(px, py);
-    return !isWall(ct) && !isDoor(ct);
+    const cell = getCell(px, py);
+    return !cell.isWall() && !cell.isDoor();
 }
 
 function inGrid(px, py) {
     return ((0.0 <= px) && (px < globals.w)) && ((0.0 <= py) && (py < globals.h));
 }
 
-function doWall(ct, px, py, bVerOrHor) {
+function doWall(cell, px, py, bVerOrHor) {
     let hit = {
-        cell: 2 * ct - (bVerOrHor ? 1 : 2),
+        distance: undefined,
+        cell: cell,
         px: px,
         py: py,
         bVerOrHor: bVerOrHor,
+        textureIndex: 2 * cell.getTextureIndex() - (bVerOrHor ? 1 : 2),
     };
 
-    if (isDoor(getCell(globals.x, globals.y))) {
+    if (getCell(globals.x, globals.y).isDoor()) {
         const cx = Math.floor(globals.x / globals.size);
         const cy = Math.floor(globals.y / globals.size);
 
@@ -881,43 +919,50 @@ function doWall(ct, px, py, bVerOrHor) {
 
         if (((a == 0) && (b == 1)) || ((a == 1) && (b == 0))) {
             // display door side walls
-            hit.cell = bVerOrHor ? 100 : 101;
+            hit.textureIndex = bVerOrHor ? 100 : 101;
         }
     }
 
     return hit;
 }
 
-function doDoor(ct, px, py, hs, vs, bVerOrHor) {
+function doDoor(cell, px, py, hs, vs, bVerOrHor) {
     const dx = px + hs / 2;
     const dy = py + vs / 2;
 
-    switch (ct) {
+    let hit = {
+        distance: undefined,
+        cell: cell,
+        px: dx,
+        py: dy,
+        bVerOrHor: bVerOrHor,
+        textureIndex: cell.getTextureIndex(),
+    };
+
+    switch (cell.getTextureIndex()) {
         // vertical hit
         case 90:
-            ct = 99;
+            hit.textureIndex = 99;
             break;
         case 92:
         case 94:
-            ct = 105;
+            hit.textureIndex = 105;
             break;
         case 100: // ?
-            ct = 103;
+            hit.textureIndex = 103;
             break;
         // horizontal hit
         case 91:
-            ct = 98;
+            hit.textureIndex = 98;
             break;
         case 93:
         case 95:
-            ct = 104;
+            hit.textureIndex = 104;
             break;
         case 101: // ?
-            ct = 102;
+            hit.textureIndex = 102;
             break;
     }
-
-    let hit = null;
 
     if (bVerOrHor) {
         const cpy = Math.floor(py / globals.size) * globals.size;
@@ -925,14 +970,7 @@ function doDoor(ct, px, py, hs, vs, bVerOrHor) {
 
         const diff = cdy - cpy;
 
-        if (diff == 0) {
-            hit = {
-                cell: ct,
-                px: dx,
-                py: dy,
-                bVerOrHor: bVerOrHor,
-            };
-        } else {
+        if (diff != 0) {
             let y = cpy;
 
             if (diff > 0) {
@@ -945,12 +983,10 @@ function doDoor(ct, px, py, hs, vs, bVerOrHor) {
             // y = m*x + c => x = (y - c) / m
             let x = (y - c) / m;
 
-            hit = {
-                cell: 100,
-                px: x,
-                py: y,
-                bVerOrHor: !bVerOrHor,
-            };
+            hit.px = x;
+            hit.py = y;
+            hit.bVerOrHor = !bVerOrHor;
+            hit.textureIndex = 100;
         }
     } else {
         const cpx = Math.floor(px / globals.size) * globals.size;
@@ -958,14 +994,7 @@ function doDoor(ct, px, py, hs, vs, bVerOrHor) {
 
         const diff = cdx - cpx;
 
-        if (diff == 0) {
-            hit = {
-                cell: ct,
-                px: dx,
-                py: dy,
-                bVerOrHor: bVerOrHor,
-            };
-        } else {
+        if (diff != 0) {
             let x = cpx;
 
             if (diff > 0) {
@@ -978,12 +1007,10 @@ function doDoor(ct, px, py, hs, vs, bVerOrHor) {
             // y = m*x + c => x = (y - c) / m
             let y = (x - c) / m;
 
-            hit = {
-                cell: 101,
-                px: x,
-                py: y,
-                bVerOrHor: !bVerOrHor,
-            };
+            hit.px = x;
+            hit.py = y;
+            hit.bVerOrHor = !bVerOrHor;
+            hit.textureIndex = 101;
         }
     }
 
@@ -1002,11 +1029,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
     if (!inGrid(px, py)) {
         return null;
     } else {
-        const ct = getCell(px, py);
-        if (isWall(ct)) {
-            return doWall(ct, px, py, bVerOrHor);
-        } else if (isDoor(ct)) {
-            return doDoor(ct, px, py, hs, vs, bVerOrHor);
+        const cell = getCell(px, py);
+        if (cell.isWall()) {
+            return doWall(cell, px, py, bVerOrHor);
+        } else if (cell.isDoor()) {
+            return doDoor(cell, px, py, hs, vs, bVerOrHor);
         }
     }
 
@@ -1018,11 +1045,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
         if (!inGrid(px, py)) {
             return null;
         } else {
-            const ct = getCell(px, py);
-            if (isWall(ct)) {
-                return doWall(ct, px, py, bVerOrHor);
-            } else if (isDoor(ct)) {
-                return doDoor(ct, px, py, hs, vs, bVerOrHor);
+            const cell = getCell(px, py);
+            if (cell.isWall()) {
+                return doWall(cell, px, py, bVerOrHor);
+            } else if (cell.isDoor()) {
+                return doDoor(cell, px, py, hs, vs, bVerOrHor);
             }
         }
     }
@@ -1159,7 +1186,8 @@ function updateBuffers(gl, buffers) {
             bVerOrHor: null,
             px: 0.0,
             py: 0.0,
-            ct: null, // cell type
+            cell: null,
+            textureIndex: null,
         };
 
         if ((pv != null) && (ph != null)) {
@@ -1194,8 +1222,9 @@ function updateBuffers(gl, buffers) {
 
             hit.px = p.px;
             hit.py = p.py;
-            hit.ct = p.cell;
+            hit.cell = p.cell;
             hit.bVerOrHor = p.bVerOrHor;
+            hit.textureIndex = p.textureIndex;
         } else {
             // ray to infinity
         }
