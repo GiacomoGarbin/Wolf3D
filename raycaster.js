@@ -547,7 +547,7 @@ function updateTexture(gl3d) {
         u = ((hit.bVerOrHor && !side) || (!hit.bVerOrHor && side)) ? (1 - u) : u;
         console.assert((0.0 <= u) && (u <= 1.0));
 
-        if (hit.cell.isDoor() && !side) {
+        if (hit.cell.isDoor() && ((hit.textureIndex == 98) || (hit.textureIndex == 99)) && !side) {
             // display door handle at the same position regardless of the door side
             u = 1 - u;
         }
@@ -919,7 +919,7 @@ function doWall(cell, px, py, bVerOrHor) {
 
         if (((a == 0) && (b == 1)) || ((a == 1) && (b == 0))) {
             // display door side walls
-            hit.textureIndex = bVerOrHor ? 100 : 101;
+            hit.textureIndex = !bVerOrHor ? 100 : 101;
         }
     }
 
