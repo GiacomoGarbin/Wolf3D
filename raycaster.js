@@ -5,6 +5,7 @@ const KEY_A = 65;
 const KEY_D = 68;
 const KEY_S = 83;
 const KEY_W = 87;
+const KEY_SPACE = 32;
 
 const HalfPI = Math.PI / 2;
 
@@ -26,6 +27,7 @@ let globals = {
     palette: [],
     offsets: null,
     levels: [],
+    activeDoors: [],
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -74,13 +76,37 @@ class Wall extends Cell {
     }
 };
 
+// door status
+const DS_CLOSED = 0;
+const DS_OPENING = 1;
+const DS_OPEN = 2;
+
 class Door extends Cell {
     constructor(textureIndex) {
         super(textureIndex);
+
+        this.status = DS_CLOSED;
+        this.progress = 0; // [0,1] = [completely closed, fully open]
     }
 
     getType() {
         return CT_DOOR;
+    }
+
+    getStatus() {
+        return this.status;
+    }
+
+    setStatus(status) {
+        this.status = status;
+    }
+
+    getProgress() {
+        return this.progress;
+    }
+
+    setProgress(progress) {
+        this.progress = progress;
     }
 };
 
@@ -354,6 +380,8 @@ function main() {
             draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
         }
 
+        updateDoors(dt);
+
         updateTexture(gl3d);
         draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
 
@@ -361,6 +389,31 @@ function main() {
     }
 
     requestAnimationFrame(render);
+}
+
+function updateDoors(dt) {
+    // loop through active doors
+    for (let i = globals.activeDoors.length - 1; i >= 0; --i) {
+        let door = globals.activeDoors[i];
+
+        switch (door.getStatus()) {
+            case DS_CLOSED:
+                console.assert(false);
+                break;
+            case DS_OPENING:
+                const progress = door.getProgress();
+                if (progress < 1) {
+                    door.setProgress(progress + dt * 0.001);
+                    // console.log(door.getProgress());
+                } else {
+                    door.setStatus(DS_OPEN);
+                }
+                break;
+            case DS_OPEN:
+                globals.activeDoors.splice(i, 1); // remove item
+                break;
+        }
+    }
 }
 
 function init2d() {
@@ -518,7 +571,7 @@ function updateTexture(gl3d) {
     const tw = 64;
     const th = 64;
 
-    // draw walls
+    // draw walls and doors
 
     for (var col = 0; col < w; ++col) {
         const hit = globals.hits[col];
@@ -544,12 +597,29 @@ function updateTexture(gl3d) {
         const c = Math.floor(p / globals.size) * globals.size;
         const side = (hit.bVerOrHor ? (hit.px - globals.x) : (hit.py - globals.y)) > 0; // 0 -> l/u, 1 -> r/d
         let u = (p - c) / globals.size; // (globals.size - 0.000001)
-        u = ((hit.bVerOrHor && !side) || (!hit.bVerOrHor && side)) ? (1 - u) : u;
+        u = (hit.bVerOrHor ? !side : side) ? (1 - u) : u;
         console.assert((0.0 <= u) && (u <= 1.0));
 
-        if (hit.cell.isDoor() && ((hit.textureIndex == 98) || (hit.textureIndex == 99)) && !side) {
-            // display door handle at the same position regardless of the door side
-            u = 1 - u;
+        if (hit.cell.isDoor() && ((hit.textureIndex == 98) || (hit.textureIndex == 99))) {
+            if (hit.bVerOrHor) {
+                if (!side) {
+                    u += hit.cell.getProgress();
+                    // display door handle at the same position regardless of the door side
+                    u = 1 - u;
+                } else {
+                    u -= hit.cell.getProgress();
+                }
+            } else {
+                if (side) {
+                    u += hit.cell.getProgress();
+                    // display door handle at the same position regardless of the door side
+                    u = 1 - u;
+                } else {
+                    u -= hit.cell.getProgress();
+                }
+            }
+
+            u = Math.max(0, Math.min(u, 1));
         }
 
         const padding = (height - h) / 2;
@@ -608,6 +678,7 @@ function shortcuts(event) {
         case KEY_D:
         case KEY_S:
         case KEY_W:
+        case KEY_SPACE:
             {
                 globals.keys[event.keyCode] = (event.type == "keydown");
                 break;
@@ -723,6 +794,29 @@ function processInput(dt) {
         globals.angle += 2 * Math.PI;
     } else if (globals.angle >= 2 * Math.PI) {
         globals.angle -= 2 * Math.PI;
+    }
+
+    // press space
+    if (!globals.keys[KEY_SPACE]) {
+        globals.isSpaceKeyDown = false;
+    } else if (globals.keys[KEY_SPACE] && !globals.isSpaceKeyDown) {
+        globals.isSpaceKeyDown = true;
+
+        if (!getCell(globals.x, globals.y).isDoor()) {
+            const dx = Math.cos(globals.angle);
+            const dy = Math.sin(globals.angle);
+
+            const t = 32 + 16;
+            const px = globals.x + t * dx;
+            const py = globals.y + t * dy;
+
+            let cell = getCell(px, py);
+
+            if (cell.isDoor()) {
+                cell.setStatus(DS_OPENING);
+                globals.activeDoors.push(cell);
+            }
+        }
     }
 }
 
@@ -987,6 +1081,41 @@ function doDoor(cell, px, py, hs, vs, bVerOrHor) {
             hit.py = y;
             hit.bVerOrHor = !bVerOrHor;
             hit.textureIndex = 100;
+
+            return hit;
+        } else if ((dy % 64) > (cell.getProgress() * 64)) {
+            return hit;
+        } else {
+            const dx = px + hs;
+            const dy = py + vs;
+
+            const cpy = Math.floor(py / globals.size) * globals.size;
+            const cdy = Math.floor(dy / globals.size) * globals.size;
+
+            const diff = cdy - cpy;
+
+            if (diff != 0) {
+                let y = cpy;
+
+                if (diff > 0) {
+                    y += 64 - 0.000001;
+                }
+
+                let m = (dy - py) / (dx - px);
+                // y = m*x + c => c = y - m*x
+                let c = py - m * px;
+                // y = m*x + c => x = (y - c) / m
+                let x = (y - c) / m;
+
+                hit.px = x;
+                hit.py = y;
+                hit.bVerOrHor = !bVerOrHor;
+                hit.textureIndex = 100;
+
+                return hit;
+            } else {
+                return null;
+            }
         }
     } else {
         const cpx = Math.floor(px / globals.size) * globals.size;
@@ -1011,15 +1140,54 @@ function doDoor(cell, px, py, hs, vs, bVerOrHor) {
             hit.py = y;
             hit.bVerOrHor = !bVerOrHor;
             hit.textureIndex = 101;
+
+            return hit;
+        } else if ((dx % 64) > (cell.getProgress() * 64)) {
+            return hit;
+        } else {
+            const dx = px + hs;
+            const dy = py + vs;
+
+            const cpx = Math.floor(px / globals.size) * globals.size;
+            const cdx = Math.floor(dx / globals.size) * globals.size;
+
+            const diff = cdx - cpx;
+
+            if (diff != 0) {
+                let x = cpx;
+
+                if (diff > 0) {
+                    x += 64 - 0.000001;
+                }
+
+                let m = (dx - px) / (dy - py);
+                // y = m*x + c => c = y - m*x
+                let c = px - m * py;
+                // y = m*x + c => x = (y - c) / m
+                let y = (x - c) / m;
+
+                hit.px = x;
+                hit.py = y;
+                hit.bVerOrHor = !bVerOrHor;
+                hit.textureIndex = 101;
+
+                return hit;
+            } else {
+                return null;
+            }
         }
     }
+}
 
-    return hit;
+function isHit(px, py) {
+
+
+    return undefined;
 }
 
 function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
-    let dx = Math.cos(theta);
-    let dy = Math.sin(theta);
+    const dx = Math.cos(theta);
+    const dy = Math.sin(theta);
 
     // find first axis intersection
     const t = intersect(r, p, d);
@@ -1033,7 +1201,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
         if (cell.isWall()) {
             return doWall(cell, px, py, bVerOrHor);
         } else if (cell.isDoor()) {
-            return doDoor(cell, px, py, hs, vs, bVerOrHor);
+            const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
+
+            if (hit != null) {
+                return hit;
+            }
         }
     }
 
@@ -1049,7 +1221,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
             if (cell.isWall()) {
                 return doWall(cell, px, py, bVerOrHor);
             } else if (cell.isDoor()) {
-                return doDoor(cell, px, py, hs, vs, bVerOrHor);
+                const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
+
+                if (hit != null) {
+                    return hit;
+                }
             }
         }
     }
