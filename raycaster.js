@@ -23,9 +23,9 @@ let globals = {
     w: 0,     // grid width
     h: 0,     // grid height
     hits: [], // hit points, one per 3D view column
-    walls: [],
     palette: [],
     offsets: null,
+    assets: null, // VSWAP.WL6
     levels: [],
     activeDoors: [],
     keys: {
@@ -110,25 +110,80 @@ class Door extends Cell {
     }
 };
 
+const CHUNKS = 663;
+const WALLS = 106;
+const SPRITES = 436;
+const SOUNDS = 121;
+
 function loadAssets(buffer) {
-    // TODO: add asserts
+    const view = new DataView(buffer);
+    globals.assets = view;
 
-    let array = new Uint16Array(buffer.slice(0, 3 * 2));
+    // sanity checks
+    {
+        // total number of chunks = walls + sprites + sounds
+        const chunks = view.getUint16(0, true);
+        console.assert(chunks == CHUNKS);
 
-    const chunks = array[0]; // walls + sprites + sounds
-    const walls = array[1]; // first sprite chunk -> walls
-    const sounds = array[2]; // first sound chunk -> walls + sprites
+        // first sprite chunk
+        const walls = view.getUint16(2, true);
+        console.assert(walls == WALLS);
 
-    // let adresses = new Uint32Array(buffer.slice(3 * 2, chunks * 4));
-    // let lengths = new Uint16Array(buffer.slice(3 * 2 + chunks * 4, chunks * 2));
+        // first sound chunk (- walls)
+        const sprites = view.getUint16(4, true) - walls;
+        console.assert(sprites == SPRITES);
 
-    const header = 3 * 2 + chunks * 4 + chunks * 2 + 112;
+        const sounds = chunks - walls - sprites;
+        console.assert(sounds == SOUNDS);
+    }
+}
 
-    for (let i = 0; i < walls; ++i) {
-        const size = 64 * 64;
-        const offset = header + i * size;
-        const wall = new Uint8Array(buffer.slice(offset, offset + size));
-        globals.walls.push(wall);
+// i: wall index
+// j: texel index
+function getWall(i, j) {
+    console.assert((0 <= i) && (i < WALLS));
+    console.assert((0 <= j) && (j < (64 * 64)));
+
+    const offset = globals.assets.getUint32(6 + i * 4, true);
+    return globals.assets.getUint8(offset + j);
+}
+
+// i: sprite index
+function drawSprite(i) {
+    console.assert((0 <= i) && (i < SPRITES));
+
+    const offset = globals.assets.getUint32(6 + (WALLS + i) * 4, true);
+    // const size = globals.assets.getUint16(6 + (CHUNKS * 4) + (WALLS + i) * 2, true);
+
+    const c0 = globals.assets.getUint16(offset + 0, true);
+    const c1 = globals.assets.getUint16(offset + 2, true);
+    const cn = c1 - c0 + 1;
+
+    let k = 0;
+
+    for (let col = c0; col <= c1; ++col) {
+        const i = globals.assets.getUint16(offset + 4 + (col - c0) * 2, true);
+
+        let j = 0;
+        let x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
+        let y = undefined;
+        let z = undefined;
+
+        while (x != 0) {
+            y = globals.assets.getUint16(offset + i + (j * 6 + 2), true);
+            z = globals.assets.getUint16(offset + i + (j * 6 + 4), true);
+
+            const r0 = z / 2;
+            const r1 = x / 2;
+
+            for (let row = r0; row < r1; ++row) {
+                const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // index palette
+                ++k;
+            }
+
+            ++j;
+            x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
+        }
     }
 }
 
@@ -151,15 +206,6 @@ function loadPalette(buffer) {
 }
 
 function loadMapHead(buffer) {
-    // TODO: use DataView
-    // TODO: compare with vpoupet
-
-    // const RLEW = new Uint16Array(buffer.slice(0, 2));
-    // console.assert(RLEW == 0xABCD);
-
-    // globals.offsets = new Uint32Array(buffer.slice(2, 2 + 100 * 4));
-    // console.assert(globals.offsets != null);
-
     const view = new DataView(buffer);
     console.assert(view.getUint16(0, true) == 0xABCD);
 
@@ -338,11 +384,13 @@ function loadFile(name, func, next) {
 }
 
 function getPaletteColor(i, j) {
-    const k = globals.walls[i][j];
+    const k = getWall(i, j);
     return globals.palette[k];
 }
 
 function main() {
+    drawSprite(4);
+
     let gl2d = init2d();
     let gl3d = init3d();
 
