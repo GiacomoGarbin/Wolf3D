@@ -28,6 +28,7 @@ let globals = {
     assets: null, // VSWAP.WL6
     levels: [],
     activeDoors: [],
+    visibles: new Set(), // visible cells
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -169,15 +170,15 @@ function drawSprite(i) {
         let y = undefined;
         let z = undefined;
 
-        while (x != 0) {
-            y = globals.assets.getUint16(offset + i + (j * 6 + 2), true);
+        while (x != 0) { // column "commands" loop (blocks of opaque texels in a column)
+            // y = globals.assets.getUint16(offset + i + (j * 6 + 2), true);
             z = globals.assets.getUint16(offset + i + (j * 6 + 4), true);
 
             const r0 = z / 2;
             const r1 = x / 2;
 
             for (let row = r0; row < r1; ++row) {
-                const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // index palette
+                const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // palette index
                 ++k;
             }
 
@@ -389,8 +390,6 @@ function getPaletteColor(i, j) {
 }
 
 function main() {
-    drawSprite(4);
-
     let gl2d = init2d();
     let gl3d = init3d();
 
@@ -589,15 +588,7 @@ function updateTexture(gl3d) {
 
     const w = globals.canvas3d.width;
     const h = globals.canvas3d.height;
-
-    const level = 0;
-    const internalFormat = gl.RGBA;
-    const width = w;
-    const height = h;
-    const border = 0;
-    const srcFormat = gl.RGBA;
-    const srcType = gl.UNSIGNED_BYTE;
-    const pixel = new Uint8Array(w * h * 4);
+    const pixels = new Uint8Array(w * h * 4);
 
     // "draw" floor and ceiling
 
@@ -609,10 +600,10 @@ function updateTexture(gl3d) {
         const b = color;
         for (var col = 0; col < w; ++col) {
             const i = (row * w + col) * 4;
-            pixel[i + 0] = r;
-            pixel[i + 1] = g;
-            pixel[i + 2] = b;
-            pixel[i + 3] = 255;
+            pixels[i + 0] = r;
+            pixels[i + 1] = g;
+            pixels[i + 2] = b;
+            pixels[i + 3] = 255;
         }
     }
 
@@ -624,7 +615,7 @@ function updateTexture(gl3d) {
     for (var col = 0; col < w; ++col) {
         const hit = globals.hits[col];
 
-        if ((hit.distance == null) || (hit.distance <= 0.0)) {
+        if ((hit.distance == Infinity) || (hit.distance <= 0.0)) {
             continue;
         }
 
@@ -696,24 +687,67 @@ function updateTexture(gl3d) {
             // const b = 0;
 
             const i = (row * w + col) * 4;
-            pixel[i + 0] = color.r;
-            pixel[i + 1] = color.g;
-            pixel[i + 2] = color.b;
-            pixel[i + 3] = 255;
+            pixels[i + 0] = color.r;
+            pixels[i + 1] = color.g;
+            pixels[i + 2] = color.b;
+            pixels[i + 3] = 255;
         }
     }
 
-    gl.texImage2D(
-        gl.TEXTURE_2D,
-        level,
-        internalFormat,
-        width,
-        height,
-        border,
-        srcFormat,
-        srcType,
-        pixel
-    );
+    // draw sprites
+
+    // level we are displaying
+    const level = globals.levels[0];
+    const plane = level.planes[1];
+    console.assert((plane.byteLength / 2) == (64 * 64));
+
+    let sprites = [];
+
+    for (let visible in globals.visibles) {
+        // for each visible cell, check if there is a sprite
+        // if so, compute distance from camera (or height)
+
+        // sprites.push(sprite);
+
+        const i = plane.getUint16(visible * 2, true);
+        // assert i
+
+        console.log(visible, Math.floor(visible / 64), visible % 64, i);
+    }
+
+    // TODO: draw visibles in debug view
+
+
+
+    // sort the sprites per distance
+
+    // draw sprites
+    for (const sprite in sprites) {
+        drawSprite(sprite, hits); // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
+    }
+
+    // write texture
+    {
+        const level = 0;
+        const internalFormat = gl.RGBA;
+        const width = w;
+        const height = h;
+        const border = 0;
+        const srcFormat = gl.RGBA;
+        const srcType = gl.UNSIGNED_BYTE;
+
+        gl.texImage2D(
+            gl.TEXTURE_2D,
+            level,
+            internalFormat,
+            width,
+            height,
+            border,
+            srcFormat,
+            srcType,
+            pixels
+        );
+    }
 }
 
 function shortcuts(event) {
@@ -1024,7 +1058,8 @@ function getCell(px, py) {
 
     const cx = Math.floor(px / globals.size);
     const cy = Math.floor(py / globals.size);
-    console.assert((0 <= cx < globals.cols) && (0 <= cy < globals.rows));
+    console.assert((0 <= cx) && (cx < globals.cols));
+    console.assert((0 <= cy) && (cy < globals.rows));
 
     const i = cy * globals.cols + cx;
     return globals.grid[i];
@@ -1041,7 +1076,7 @@ function inGrid(px, py) {
 
 function doWall(cell, px, py, bVerOrHor) {
     let hit = {
-        distance: undefined,
+        distance: Infinity,
         cell: cell,
         px: px,
         py: py,
@@ -1073,7 +1108,7 @@ function doDoor(cell, px, py, hs, vs, bVerOrHor) {
     const dy = py + vs / 2;
 
     let hit = {
-        distance: undefined,
+        distance: Infinity,
         cell: cell,
         px: dx,
         py: dy,
@@ -1227,10 +1262,15 @@ function doDoor(cell, px, py, hs, vs, bVerOrHor) {
     }
 }
 
-function isHit(px, py) {
+function markVisible(px, py) {
+    const cx = Math.floor(px / globals.size);
+    const cy = Math.floor(py / globals.size);
+    console.assert((0 <= cx) && (cx < globals.cols));
+    console.assert((0 <= cy) && (cy < globals.rows));
 
-
-    return undefined;
+    const i = cy * globals.cols + cx;
+    globals.visibles.add(i);
+    // globals.visibles.add([px, py]);
 }
 
 function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
@@ -1248,11 +1288,13 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
         const cell = getCell(px, py);
         if (cell.isWall()) {
             return doWall(cell, px, py, bVerOrHor);
-        } else if (cell.isDoor()) {
-            const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
-
-            if (hit != null) {
-                return hit;
+        } else {
+            markVisible(px, py);
+            if (cell.isDoor()) {
+                const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
+                if (hit != null) {
+                    return hit;
+                }
             }
         }
     }
@@ -1268,11 +1310,13 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
             const cell = getCell(px, py);
             if (cell.isWall()) {
                 return doWall(cell, px, py, bVerOrHor);
-            } else if (cell.isDoor()) {
-                const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
-
-                if (hit != null) {
-                    return hit;
+            } else {
+                markVisible(px, py);
+                if (cell.isDoor()) {
+                    const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
+                    if (hit != null) {
+                        return hit;
+                    }
                 }
             }
         }
@@ -1390,6 +1434,9 @@ function updateBuffers(gl, buffers) {
         inc = fov / (count - 1);
     }
 
+    globals.visibles.clear();
+    markVisible(globals.x, globals.y);
+
     for (let i = 0; i < count; ++i, angle += inc) {
         let theta = globals.angle + angle;
 
@@ -1400,13 +1447,16 @@ function updateBuffers(gl, buffers) {
             theta -= 2 * Math.PI;
         }
 
+        // TODO: improve DDA, ping-pong between vertical and horizontal jumps
+        // you can stop as soon as you have a hit and the other ray is already over the hit point
+        // this should refine the visible cells list as well as speed-up the raycaster
         const pv = findVerticalIntersection(theta);
         const ph = findHorizontalIntersection(theta);
 
         let p = null;
 
         let hit = {
-            distance: null,
+            distance: Infinity,
             bVerOrHor: null,
             px: 0.0,
             py: 0.0,
@@ -1415,10 +1465,8 @@ function updateBuffers(gl, buffers) {
         };
 
         if ((pv != null) && (ph != null)) {
-            // TODO: we can use the distance square here
             const d0 = distance(pv.px, pv.py);
             const d1 = distance(ph.px, ph.py);
-
             if (d0 < d1) {
                 p = pv;
                 hit.distance = d0;
@@ -1651,6 +1699,27 @@ function draw2dScene(gl, programInfo, buffers) {
         const rgb = (127 + 32 - 16) / 255;
         const fragColor = [rgb, rgb, rgb, 1.0];
         draw2dElement(gl, buffers.empty, programInfo, fragColor, pointSize, gl.POINTS);
+    }
+
+    // draw visible cells
+    {
+        let vertices = [];
+
+        for (const visible of globals.visibles) {
+            const x = (visible % 64) * 64 + 32;
+            const y = Math.floor(visible / 64) * 64 + 32;
+            vertices.push(x, y);
+        }
+
+        const buffer = {
+            buffer: createBuffer(gl, vertices),
+            count: vertices.length / 2,
+        };
+
+        const fragColor = [1.0, 0.0, 0.0, 1.0];
+        draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
+
+        gl.deleteBuffer(buffer.buffer);
     }
 
     // draw rays
