@@ -149,8 +149,18 @@ function getWall(i, j) {
     return globals.assets.getUint8(offset + j);
 }
 
-// i: sprite index
-function drawSprite(i) {
+function drawSprite(sprite, hits, pixels) {
+    const sw = 64; // sprite width
+    const sh = 64; // sprite height
+
+    const height = 64 * 2; // getHeight(sprite.distance);
+    const h = globals.canvas3d.height;
+
+    // const o = 0 + (h / 2) - (height / 2);
+    // const row0 = Math.max(0, o);
+    // const row1 = Math.min(o + height, h);
+
+    const i = 4; // sprite.textureIndex;
     console.assert((0 <= i) && (i < SPRITES));
 
     const offset = globals.assets.getUint32(6 + (WALLS + i) * 4, true);
@@ -158,16 +168,44 @@ function drawSprite(i) {
 
     const c0 = globals.assets.getUint16(offset + 0, true);
     const c1 = globals.assets.getUint16(offset + 2, true);
+    console.assert((0 <= c0) && (c0 < sw) && (0 <= c1) && (c1 < sw));
     const cn = c1 - c0 + 1;
 
-    let k = 0;
+    // scale col range based on height
+    const s0 = (height - 1) / (sh - 1);
+    const s1 = (height - 0) / (sh - 1);
+    const col0 = Math.min(Math.floor(c0 * s0), height - 1);
+    const col1 = Math.min(Math.floor(c1 * s1), height - 1);
+    // TODO: offset to the screen center and clamp the scaled range to screen size
 
-    for (let col = c0; col <= c1; ++col) {
-        const i = globals.assets.getUint16(offset + 4 + (col - c0) * 2, true);
+    let ptx = undefined; // prev tx
+    let k = 0;
+    let pk = 0; // prev k
+
+    for (let col = col0; col <= col1; ++col) {
+        // compute u
+        const u = col / (height - 1);
+        // compute tx
+        const tx = Math.min(Math.floor(u * sw), sw - 1);
+        console.assert((0 <= tx) && (tx < sw));
+
+        if (ptx == undefined) {
+            ptx = tx;
+        } else if (tx != ptx) {
+            ptx = tx;
+            ++k;
+            pk = k;
+        }
+
+        let pty = undefined; // prev ty
+        k = pk;
+
+        // const i = globals.assets.getUint16(offset + 4 + (col - c0) * 2, true);
+        const i = globals.assets.getUint16(offset + 4 + (tx - c0) * 2, true);
 
         let j = 0;
         let x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
-        let y = undefined;
+        // let y = undefined;
         let z = undefined;
 
         while (x != 0) { // column "commands" loop (blocks of opaque texels in a column)
@@ -177,15 +215,41 @@ function drawSprite(i) {
             const r0 = z / 2;
             const r1 = x / 2;
 
-            for (let row = r0; row < r1; ++row) {
+            // scale row range based on height
+            const row0 = Math.min(Math.floor(r0 * s0), height - 1);
+            const row1 = Math.min(Math.floor((r1 - 1) * s1), height - 1);
+            // TODO: offset to the screen center and clamp the scaled range to screen size
+
+            for (let row = row0; row <= row1; ++row) {
+                // compute v
+                const v = row / (height - 1);
+                // compute ty
+                const ty = Math.min(Math.floor(v * sh), sh - 1);
+                console.assert((0 <= ty) && (ty < sh));
+
+                if (pty == undefined) {
+                    pty = ty;
+                } else if (ty != pty) {
+                    pty = ty;
+                    ++k;
+                }
+
                 const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // palette index
-                ++k;
+                const color = globals.palette[p];
+
+                const t = (row * globals.canvas3d.width + col) * 4;
+                pixels[t + 0] = color.r;
+                pixels[t + 1] = color.g;
+                pixels[t + 2] = color.b;
+                pixels[t + 3] = 255;
             }
 
             ++j;
             x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
         }
     }
+
+    console.log();
 }
 
 function loadPalette(buffer) {
@@ -578,6 +642,12 @@ function init3d() {
     return result;
 }
 
+function getHeight(distance) {
+    // TODO: scale based on 3D canvas aspect ratio
+    const scale = globals.size * 318.5;
+    return Math.round(scale / distance) * 2;
+}
+
 function updateTexture(gl3d) {
     const gl = gl3d.gl;
 
@@ -620,8 +690,7 @@ function updateTexture(gl3d) {
         }
 
         // pixels column height
-        const scale = globals.size * 318.5; // TODO: scale based on 3D canvas aspect ratio
-        const height = Math.round(scale / hit.distance) * 2;
+        const height = getHeight(hit.distance);
 
         if (height == 0) {
             continue;
@@ -703,27 +772,37 @@ function updateTexture(gl3d) {
 
     let sprites = [];
 
-    for (let visible in globals.visibles) {
-        // for each visible cell, check if there is a sprite
-        // if so, compute distance from camera (or height)
-
-        // sprites.push(sprite);
-
+    for (let visible of globals.visibles) {
         const i = plane.getUint16(visible * 2, true);
-        // assert i
+        // TODO: assert i
 
-        console.log(visible, Math.floor(visible / 64), visible % 64, i);
+        if (i != 0) {
+            const x = (visible % globals.size) * globals.size + 32;
+            const y = Math.floor(visible / globals.size) * globals.size + 32;
+
+            const d = distance(x, y);
+            if ((d == Infinity) || (d <= 0.0)) {
+                continue;
+            }
+
+            const sprite = {
+                textureIndex: i,
+                x: x,
+                y: y,
+                distance: d,
+            }
+            sprites.push(sprite);
+        }
     }
 
-    // TODO: draw visibles in debug view
-
-
-
     // sort the sprites per distance
+    sprites.sort(function (a, b) { a.distance < b.distance; });
 
     // draw sprites
-    for (const sprite in sprites) {
-        drawSprite(sprite, hits); // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
+    for (const sprite of sprites) {
+        // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
+        drawSprite(sprite, globals.hits, pixels);
+        break;
     }
 
     // write texture
@@ -1701,7 +1780,7 @@ function draw2dScene(gl, programInfo, buffers) {
         draw2dElement(gl, buffers.empty, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
-    // draw visible cells
+    // draw visible cells (right now cells visited by the raycaster) 
     {
         let vertices = [];
 
