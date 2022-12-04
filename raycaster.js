@@ -154,11 +154,11 @@ function drawSprite(sprite, hits, pixels) {
     const sh = 64; // sprite height
 
     const height = 64 * 2; // getHeight(sprite.distance);
+    const w = globals.canvas3d.width;
     const h = globals.canvas3d.height;
 
-    // const o = 0 + (h / 2) - (height / 2);
-    // const row0 = Math.max(0, o);
-    // const row1 = Math.min(o + height, h);
+    const ho = (w - height) / 2;
+    const vo = (h - height) / 2;
 
     const i = 4; // sprite.textureIndex;
     console.assert((0 <= i) && (i < SPRITES));
@@ -171,12 +171,15 @@ function drawSprite(sprite, hits, pixels) {
     console.assert((0 <= c0) && (c0 < sw) && (0 <= c1) && (c1 < sw));
     const cn = c1 - c0 + 1;
 
-    // scale col range based on height
-    const s0 = (height - 1) / (sh - 1);
+    const s0 = (height - 0) / (sh - 0);
     const s1 = (height - 0) / (sh - 1);
-    const col0 = Math.min(Math.floor(c0 * s0), height - 1);
-    const col1 = Math.min(Math.floor(c1 * s1), height - 1);
-    // TODO: offset to the screen center and clamp the scaled range to screen size
+
+    // scale col range based on height
+    let col0 = ho + Math.min(Math.floor(c0 * s0), height - 1);
+    let col1 = ho + Math.min(Math.floor(c1 * s1), height - 1);
+    // offset to the screen center and clamp the scaled range to screen size
+    col0 = Math.max(0, Math.min(col0, w - 1));
+    col1 = Math.max(0, Math.min(col1, w - 1));
 
     let ptx = undefined; // prev tx
     let k = 0;
@@ -184,7 +187,7 @@ function drawSprite(sprite, hits, pixels) {
 
     for (let col = col0; col <= col1; ++col) {
         // compute u
-        const u = col / (height - 1);
+        const u = (col - ho) / (height - 1);
         // compute tx
         const tx = Math.min(Math.floor(u * sw), sw - 1);
         console.assert((0 <= tx) && (tx < sw));
@@ -216,13 +219,15 @@ function drawSprite(sprite, hits, pixels) {
             const r1 = x / 2;
 
             // scale row range based on height
-            const row0 = Math.min(Math.floor(r0 * s0), height - 1);
-            const row1 = Math.min(Math.floor((r1 - 1) * s1), height - 1);
-            // TODO: offset to the screen center and clamp the scaled range to screen size
+            let row0 = vo + Math.min(Math.floor((r0 - 0) * s0), height - 1);
+            let row1 = vo + Math.min(Math.floor((r1 - 1) * s1), height - 1);
+            // offset to the screen center and clamp the scaled range to screen size
+            row0 = Math.max(0, Math.min(row0, h - 1));
+            row1 = Math.max(0, Math.min(row1, h - 1));
 
             for (let row = row0; row <= row1; ++row) {
                 // compute v
-                const v = row / (height - 1);
+                const v = (row - vo) / (height - 1);
                 // compute ty
                 const ty = Math.min(Math.floor(v * sh), sh - 1);
                 console.assert((0 <= ty) && (ty < sh));
@@ -237,7 +242,7 @@ function drawSprite(sprite, hits, pixels) {
                 const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // palette index
                 const color = globals.palette[p];
 
-                const t = (row * globals.canvas3d.width + col) * 4;
+                const t = ((vo + height - (row - vo)) * globals.canvas3d.width + col) * 4;
                 pixels[t + 0] = color.r;
                 pixels[t + 1] = color.g;
                 pixels[t + 2] = color.b;
@@ -248,8 +253,6 @@ function drawSprite(sprite, hits, pixels) {
             x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
         }
     }
-
-    console.log();
 }
 
 function loadPalette(buffer) {
