@@ -173,8 +173,10 @@ function drawSprite(sprite, hits, pixels) {
     [px, py] = rotate([px, py], -globals.angle);
 
     const distance = px;
+    // near clipping plane
+    const near = 15;
 
-    if (distance <= 0) {
+    if (distance <= near) {
         return;
     }
 
@@ -208,7 +210,6 @@ function drawSprite(sprite, hits, pixels) {
     }
 
     const ho = Math.round(px) - (height) / 2;
-    // const ho = -Math.round(py) + (w - height) / 2;
     const vo = (h - height) / 2;
 
     const i = sprite.textureIndex;
