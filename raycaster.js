@@ -112,6 +112,14 @@ class Door extends Cell {
     setProgress(progress) {
         this.progress = progress;
     }
+
+    isOpen() {
+        return this.status == DS_OPEN;
+    }
+
+    isClosed() {
+        return !this.isOpen();
+    }
 };
 
 const CHUNKS = 663;
@@ -579,7 +587,7 @@ function updateDoors(dt) {
             case DS_OPENING:
                 const progress = door.getProgress();
                 if (progress < 1) {
-                    door.setProgress(progress + dt * 0.001);
+                    door.setProgress(Math.min(progress + dt * 0.001, 1));
                     // console.log(door.getProgress());
                 } else {
                     door.setStatus(DS_OPEN);
@@ -1006,16 +1014,32 @@ function processInput(dt) {
     [tx, ty] = rotate([tx, ty], globals.angle);
     [tx, ty] = translate([tx, ty], [dx, dy]);
 
-    // check wall collision
-    if (!getCell(tx, globals.y).isWall()) {
-        // apply translation
-        globals.x = px;
+    // check wall and (closed) door collision
+    {
+        const cell = getCell(tx, globals.y);
+
+        if (cell.isWall()) {
+            // block
+        } else if (cell.isDoor() && cell.isClosed()) {
+            // block
+        } else {
+            // apply translation
+            globals.x = px;
+        }
     }
 
-    // check wall collision
-    if (!getCell(globals.x, ty).isWall()) {
-        // apply translation
-        globals.y = py;
+    // check wall and (closed) door collision
+    {
+        const cell = getCell(globals.x, ty);
+
+        if (cell.isWall()) {
+            // block
+        } else if (cell.isDoor() && cell.isClosed()) {
+            // block
+        } else {
+            // apply translation
+            globals.y = py;
+        }
     }
 
     // clamp position
