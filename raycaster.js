@@ -29,6 +29,8 @@ let globals = {
     levels: [],
     activeDoors: [],
     visibles: new Set(), // visible cells
+    sprites: [],
+    fov: HalfPI / 2, // field of view
     keys: {
         KEY_SHIFT: false,
         KEY_LEFT: false,
@@ -149,18 +151,102 @@ function getWall(i, j) {
     return globals.assets.getUint8(offset + j);
 }
 
+function isInQ1(angle) {
+    return (angle >= 0) && (angle < HalfPI);
+}
+
+function isInQ4(angle) {
+    return (angle >= (3 * HalfPI)) && (angle < (2 * Math.PI));
+}
+
 function drawSprite(sprite, hits, pixels) {
     const sw = 64; // sprite width
     const sh = 64; // sprite height
 
-    const height = 64 * 2; // getHeight(sprite.distance);
     const w = globals.canvas3d.width;
     const h = globals.canvas3d.height;
 
-    const ho = (w - height) / 2;
+    // grid (world) space -> player (camera) space
+    const [dx, dy] = [globals.x, globals.y];
+    let [px1, py1] = translate([sprite.x, sprite.y], [-dx, -dy]);
+    let [px, py] = rotate([px1, py1], -globals.angle);
+
+    // if (px <= 0) {
+    //     return;
+    // }
+
+    {
+        const hx = sprite.x - globals.x;
+        const hy = sprite.y - globals.y;
+
+        let p = Math.atan2(-hy, hx); // * (180 / PI)
+        let p1 = p;
+
+        if (p >= (2 * Math.PI)) {
+            p -= 2 * Math.PI;
+        } else if (p < 0) {
+            p += 2 * Math.PI;
+        }
+
+        let a = 2 * Math.PI - globals.angle;
+
+        let q = a + (globals.fov / 2) - p;
+        let q1 = q;
+
+        if (isInQ1(a) && isInQ4(p)) {
+            q += 2 * Math.PI;
+        } else if (isInQ4(a) && isInQ1(p)) {
+            q -= 2 * Math.PI;
+        }
+
+        // if player_rot in quadrant 1 and p in quadrant 4:
+        // q += 360
+        // if player_rot in quadrant 4 and p in quadrant 1:
+        // q -= 360
+
+        px = q * (globals.canvas3d.width / globals.fov);
+        py = py;
+
+        const s = 180 / Math.PI;
+
+        // let debug = document.getElementById("debug");
+        // debug.innerText =
+        //     " player.x: " + globals.x.toFixed(3) + "\n" +
+        //     " player.y: " + globals.y.toFixed(3) + "\n" +
+        //     " player.angle: " + a.toFixed(3) + "\n" +
+        //     " sprite.x: " + sprite.x.toFixed(3) + "\n" +
+        //     " sprite.y: " + sprite.y.toFixed(3) + "\n" +
+        //     " hx: " + hx.toFixed(3) + "\n" +
+        //     " hy: " + hy.toFixed(3) + "\n" +
+        //     " p: " + p1.toFixed(3) + " " + (p1 * s).toFixed(3) + "\n" +
+        //     " p: " + p.toFixed(3) + " " + (p * s).toFixed(3) + "\n" +
+        //     " q: " + q1.toFixed(3) + " " + (q1 * s).toFixed(3) + "\n" +
+        //     " q: " + q.toFixed(3) + " " + (q * s).toFixed(3) + "\n" +
+        //     " px: " + px.toFixed(3);
+    }
+
+
+    // const height = getHeight(px);
+    const height = getHeight(sprite.distance);
+
+
+    // let debug = document.getElementById("debug");
+    // debug.innerText =
+    //     " player.x: " + globals.x.toFixed(3) + "\n" +
+    //     " player.y: " + globals.y.toFixed(3) + "\n" +
+    //     " player.angle: " + globals.angle.toFixed(3) + "\n" +
+    //     " sprite.x: " + sprite.x.toFixed(3) + "\n" +
+    //     " sprite.y: " + sprite.y.toFixed(3) + "\n" +
+    //     " sprite.x: " + px1.toFixed(3) + "\n" +
+    //     " sprite.y: " + py1.toFixed(3) + "\n" +
+    //     " sprite.x: " + px.toFixed(3) + "\n" +
+    //     " sprite.y: " + py.toFixed(3);
+
+    const ho = Math.round(px) - (height) / 2;
+    // const ho = -Math.round(py) + (w - height) / 2;
     const vo = (h - height) / 2;
 
-    const i = 4; // sprite.textureIndex;
+    const i = sprite.textureIndex;
     console.assert((0 <= i) && (i < SPRITES));
 
     const offset = globals.assets.getUint32(6 + (WALLS + i) * 4, true);
@@ -171,40 +257,13 @@ function drawSprite(sprite, hits, pixels) {
     console.assert((0 <= c0) && (c0 < sw) && (0 <= c1) && (c1 < sw));
     const cn = c1 - c0 + 1;
 
-    const s0 = (height - 0) / (sh - 0);
-    const s1 = (height - 0) / (sh - 1);
+    const s0 = height / sh;
+    const s1 = Math.ceil(s0);
 
-    // scale col range based on height
-    let col0 = ho + Math.min(Math.floor(c0 * s0), height - 1);
-    let col1 = ho + Math.min(Math.floor(c1 * s1), height - 1);
-    // offset to the screen center and clamp the scaled range to screen size
-    col0 = Math.max(0, Math.min(col0, w - 1));
-    col1 = Math.max(0, Math.min(col1, w - 1));
-
-    let ptx = undefined; // prev tx
     let k = 0;
-    let pk = 0; // prev k
 
-    for (let col = col0; col <= col1; ++col) {
-        // compute u
-        const u = (col - ho) / (height - 1);
-        // compute tx
-        const tx = Math.min(Math.floor(u * sw), sw - 1);
-        console.assert((0 <= tx) && (tx < sw));
-
-        if (ptx == undefined) {
-            ptx = tx;
-        } else if (tx != ptx) {
-            ptx = tx;
-            ++k;
-            pk = k;
-        }
-
-        let pty = undefined; // prev ty
-        k = pk;
-
-        // const i = globals.assets.getUint16(offset + 4 + (col - c0) * 2, true);
-        const i = globals.assets.getUint16(offset + 4 + (tx - c0) * 2, true);
+    for (let col = c0; col <= c1; ++col) {
+        const i = globals.assets.getUint16(offset + 4 + (col - c0) * 2, true);
 
         let j = 0;
         let x = globals.assets.getUint16(offset + i + (j * 6 + 0), true);
@@ -218,35 +277,32 @@ function drawSprite(sprite, hits, pixels) {
             const r0 = z / 2;
             const r1 = x / 2;
 
-            // scale row range based on height
-            let row0 = vo + Math.min(Math.floor((r0 - 0) * s0), height - 1);
-            let row1 = vo + Math.min(Math.floor((r1 - 1) * s1), height - 1);
-            // offset to the screen center and clamp the scaled range to screen size
-            row0 = Math.max(0, Math.min(row0, h - 1));
-            row1 = Math.max(0, Math.min(row1, h - 1));
+            for (let row = r0; row < r1; ++row) {
 
-            for (let row = row0; row <= row1; ++row) {
-                // compute v
-                const v = (row - vo) / (height - 1);
-                // compute ty
-                const ty = Math.min(Math.floor(v * sh), sh - 1);
-                console.assert((0 <= ty) && (ty < sh));
-
-                if (pty == undefined) {
-                    pty = ty;
-                } else if (ty != pty) {
-                    pty = ty;
-                    ++k;
-                }
+                let tx = ho + Math.floor(col * s0);
+                let ty = vo + Math.floor(row * s0);
+                tx = Math.max(0, Math.min(tx, w - 1));
+                ty = Math.max(0, Math.min(ty, h - 1));
 
                 const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // palette index
                 const color = globals.palette[p];
 
-                const t = ((vo + height - (row - vo)) * globals.canvas3d.width + col) * 4;
-                pixels[t + 0] = color.r;
-                pixels[t + 1] = color.g;
-                pixels[t + 2] = color.b;
-                pixels[t + 3] = 255;
+                for (let x = tx; (x < tx + s1) && (x < w); ++x) {
+                    if (hits[x].distance < sprite.distance) {
+                        continue;
+                    }
+
+                    for (let y = ty; (y < ty + s1) && (y < h); ++y) {
+
+                        const t = ((vo + height - (y - vo)) * globals.canvas3d.width + x) * 4;
+                        pixels[t + 0] = color.r;
+                        pixels[t + 1] = color.g;
+                        pixels[t + 2] = color.b;
+                        pixels[t + 3] = 255;
+                    }
+                }
+
+                ++k;
             }
 
             ++j;
@@ -462,6 +518,21 @@ function main() {
 
     // init player position and direction
     // TODO: read player spawn position from level.plane[1]
+
+    const level = globals.levels[0];
+    const plane = level.planes[1];
+
+    for (let x = 0; x < globals.cols; ++x) {
+        for (let y = 0; y < globals.rows; ++y) {
+            const i = y * globals.cols + x;
+            const v = plane.getUint16(i * 2, true);
+            if ((19 <= v) && (v <= 22)) {
+                globals.x = x;
+                globals.y = y;
+            }
+        }
+    }
+
     globals.x = 28 * globals.size + (globals.size / 2);
     globals.y = 57 * globals.size + (globals.size / 2);
     globals.angle = 0;
@@ -491,13 +562,17 @@ function main() {
         if (gl2d.gl != null) {
             // debug top-down view
             gl2d.buffers = updateBuffers(gl2d.gl, gl2d.buffers);
-            draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
+            // draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
         }
 
         updateDoors(dt);
 
         updateTexture(gl3d);
         draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
+
+        if (gl2d.gl != null) {
+            draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
+        }
 
         requestAnimationFrame(render);
     }
@@ -666,11 +741,10 @@ function updateTexture(gl3d) {
     // "draw" floor and ceiling
 
     for (var row = 0; row < h; ++row) {
-        const sign = (row < (h / 2)) ? +1 : -1;
-        const color = 127 + (sign * 32) - 16;
-        const r = color;
-        const g = color;
-        const b = color;
+        const half = row < (h / 2);
+        const r = half ? 114 : 47;
+        const g = half ? 112 : 46;
+        const b = half ? 114 : 48;
         for (var col = 0; col < w; ++col) {
             const i = (row * w + col) * 4;
             pixels[i + 0] = r;
@@ -776,14 +850,22 @@ function updateTexture(gl3d) {
     let sprites = [];
 
     for (let visible of globals.visibles) {
-        const i = plane.getUint16(visible * 2, true);
+        let i = plane.getUint16(visible * 2, true);
         // TODO: assert i
+
+        if ((23 <= i) && (i <= 70)) {
+            i -= 21;
+        } else if (i == 124) {
+            i = 95;
+        } else {
+            i = 0;
+        }
 
         if (i != 0) {
             const x = (visible % globals.size) * globals.size + 32;
             const y = Math.floor(visible / globals.size) * globals.size + 32;
 
-            const d = distance(x, y);
+            const d = distance(x, y); // wrong, we want distance in player space
             if ((d == Infinity) || (d <= 0.0)) {
                 continue;
             }
@@ -798,14 +880,34 @@ function updateTexture(gl3d) {
         }
     }
 
+    // let debug = document.getElementById("debug");
+    // debug.innerText = "";
+
+    // for (const sprite of sprites) {
+    //     debug.innerText += " " + sprite.distance;
+    // }
+
     // sort the sprites per distance
-    sprites.sort(function (a, b) { a.distance < b.distance; });
+    sprites.sort((a, b) => { return b.distance - a.distance; });
+
+    // debug.innerText += "\n";
+    // for (const sprite of sprites) {
+    //     debug.innerText += " " + sprite.distance;
+    // }
+
+    globals.sprites = [];
+
 
     // draw sprites
     for (const sprite of sprites) {
         // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
         drawSprite(sprite, globals.hits, pixels);
-        break;
+
+        globals.sprites.push(sprite);
+
+        // debug.innerText += "\n x: " + sprite.x + " y: " + sprite.y + " d:" + sprite.distance;
+
+        // break;
     }
 
     // write texture
@@ -1498,8 +1600,7 @@ function updateBuffers(gl, buffers) {
 
     // ========== rays ==========
 
-    const fov = HalfPI / 2; // field of view
-    console.assert((0.0 < fov) && (fov < Math.PI));
+    console.assert((0.0 < globals.fov) && (globals.fov < Math.PI));
     const count = globals.canvas3d.width; // number of rays
 
     let rays = [];
@@ -1512,8 +1613,8 @@ function updateBuffers(gl, buffers) {
     let inc = 0.0;
 
     if (count > 1) {
-        angle -= (fov / 2);
-        inc = fov / (count - 1);
+        angle -= (globals.fov / 2);
+        inc = globals.fov / (count - 1);
     }
 
     globals.visibles.clear();
@@ -1823,6 +1924,28 @@ function draw2dScene(gl, programInfo, buffers) {
         const fragColor = [1.0, 1.0, 0.0, 1.0];
         const pointSize = 5;
         draw2dElement(gl, buffers.player, programInfo, fragColor, pointSize, gl.POINTS);
+    }
+
+    // draw sprite
+    {
+        let vertices = [];
+
+        for (const sprite of globals.sprites) {
+            const x = sprite.x;
+            const y = sprite.y;
+            vertices.push(x, y);
+        }
+
+        const buffer = {
+            buffer: createBuffer(gl, vertices),
+            count: vertices.length / 2,
+        };
+
+        const fragColor = [0.0, 1.0, 0.0, 1.0];
+        const pointSize = 5;
+        draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
+
+        gl.deleteBuffer(buffer.buffer);
     }
 }
 
