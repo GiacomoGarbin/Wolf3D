@@ -192,7 +192,8 @@ function drawSprite(sprite, hits, pixels) {
             p += 2 * Math.PI;
         }
 
-        let a = 2 * Math.PI - globals.angle;
+        // convert player angle from clockwise to counterclockwise
+        const a = (globals.angle == 0) ? 0 : (2 * Math.PI - globals.angle);
 
         let q = a + (globals.fov / 2) - p;
 
@@ -241,23 +242,27 @@ function drawSprite(sprite, hits, pixels) {
             const r1 = x / 2;
 
             for (let row = r0; row < r1; ++row) {
-
                 let tx = ho + Math.floor(col * s0);
                 let ty = vo + Math.floor(row * s0);
+
+                if (((ty + s1) < 0) || (ty >= h) || ((tx + s1) < 0) || (tx >= w)) {
+                    ++k;
+                    continue;
+                }
+
                 tx = Math.max(0, Math.min(tx, w - 1));
                 ty = Math.max(0, Math.min(ty, h - 1));
 
-                const p = globals.assets.getUint8(offset + 4 + cn * 2 + k); // palette index
-                const color = globals.palette[p];
+                const index = globals.assets.getUint8(offset + 4 + cn * 2 + k);
+                const color = globals.palette[index];
 
-                for (let x = tx; (x < tx + s1) && (x < w); ++x) {
-                    if (hits[x].distance < distance) {
+                for (let x0 = tx; (x0 < (tx + s1)) && (x0 < w); ++x0) {
+                    if (hits[x0].distance < distance) {
                         continue;
                     }
 
-                    for (let y = ty; (y < ty + s1) && (y < h); ++y) {
-
-                        const t = ((vo + height - (y - vo)) * globals.canvas3d.width + x) * 4;
+                    for (let y0 = ty; (y0 < (ty + s1)) && (y0 < h); ++y0) {
+                        const t = ((vo + height - (y0 - vo)) * globals.canvas3d.width + x0) * 4;
                         pixels[t + 0] = color.r;
                         pixels[t + 1] = color.g;
                         pixels[t + 2] = color.b;
@@ -821,14 +826,14 @@ function updateTexture(gl3d) {
         } else if (i == 124) {
             i = 95;
         } else {
-            i = 0;
+            i = undefined;
         }
 
-        if (i != 0) {
+        if (i != undefined) {
             const x = (visible % globals.size) * globals.size + 32;
             const y = Math.floor(visible / globals.size) * globals.size + 32;
 
-            const d = distance(x, y); // wrong, we want distance in player space
+            const d = distance(x, y);
             if ((d == Infinity) || (d <= 0.0)) {
                 continue;
             }
@@ -852,12 +857,8 @@ function updateTexture(gl3d) {
     for (const sprite of sprites) {
         // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
         drawSprite(sprite, globals.hits, pixels);
-
         globals.sprites.push(sprite);
-
-        break;
     }
-
     // write texture
     {
         const level = 0;
