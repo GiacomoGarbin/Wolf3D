@@ -168,19 +168,23 @@ function drawSprite(sprite, hits, pixels) {
 
     // grid (world) space -> player (camera) space
     const [dx, dy] = [globals.x, globals.y];
-    let [px1, py1] = translate([sprite.x, sprite.y], [-dx, -dy]);
-    let [px, py] = rotate([px1, py1], -globals.angle);
+    let [px, py] = translate([sprite.x, sprite.y], [-dx, -dy]);
+    [px, py] = rotate([px, py], -globals.angle);
 
-    // if (px <= 0) {
-    //     return;
-    // }
+    const distance = px;
 
+    if (distance <= 0) {
+        return;
+    }
+
+    const height = getHeight(distance);
+
+    // find sprite screen space horizontal position
     {
         const hx = sprite.x - globals.x;
         const hy = sprite.y - globals.y;
 
-        let p = Math.atan2(-hy, hx); // * (180 / PI)
-        let p1 = p;
+        let p = Math.atan2(-hy, hx);
 
         if (p >= (2 * Math.PI)) {
             p -= 2 * Math.PI;
@@ -191,7 +195,6 @@ function drawSprite(sprite, hits, pixels) {
         let a = 2 * Math.PI - globals.angle;
 
         let q = a + (globals.fov / 2) - p;
-        let q1 = q;
 
         if (isInQ1(a) && isInQ4(p)) {
             q += 2 * Math.PI;
@@ -199,48 +202,8 @@ function drawSprite(sprite, hits, pixels) {
             q -= 2 * Math.PI;
         }
 
-        // if player_rot in quadrant 1 and p in quadrant 4:
-        // q += 360
-        // if player_rot in quadrant 4 and p in quadrant 1:
-        // q -= 360
-
         px = q * (globals.canvas3d.width / globals.fov);
-        py = py;
-
-        const s = 180 / Math.PI;
-
-        // let debug = document.getElementById("debug");
-        // debug.innerText =
-        //     " player.x: " + globals.x.toFixed(3) + "\n" +
-        //     " player.y: " + globals.y.toFixed(3) + "\n" +
-        //     " player.angle: " + a.toFixed(3) + "\n" +
-        //     " sprite.x: " + sprite.x.toFixed(3) + "\n" +
-        //     " sprite.y: " + sprite.y.toFixed(3) + "\n" +
-        //     " hx: " + hx.toFixed(3) + "\n" +
-        //     " hy: " + hy.toFixed(3) + "\n" +
-        //     " p: " + p1.toFixed(3) + " " + (p1 * s).toFixed(3) + "\n" +
-        //     " p: " + p.toFixed(3) + " " + (p * s).toFixed(3) + "\n" +
-        //     " q: " + q1.toFixed(3) + " " + (q1 * s).toFixed(3) + "\n" +
-        //     " q: " + q.toFixed(3) + " " + (q * s).toFixed(3) + "\n" +
-        //     " px: " + px.toFixed(3);
     }
-
-
-    // const height = getHeight(px);
-    const height = getHeight(sprite.distance);
-
-
-    // let debug = document.getElementById("debug");
-    // debug.innerText =
-    //     " player.x: " + globals.x.toFixed(3) + "\n" +
-    //     " player.y: " + globals.y.toFixed(3) + "\n" +
-    //     " player.angle: " + globals.angle.toFixed(3) + "\n" +
-    //     " sprite.x: " + sprite.x.toFixed(3) + "\n" +
-    //     " sprite.y: " + sprite.y.toFixed(3) + "\n" +
-    //     " sprite.x: " + px1.toFixed(3) + "\n" +
-    //     " sprite.y: " + py1.toFixed(3) + "\n" +
-    //     " sprite.x: " + px.toFixed(3) + "\n" +
-    //     " sprite.y: " + py.toFixed(3);
 
     const ho = Math.round(px) - (height) / 2;
     // const ho = -Math.round(py) + (w - height) / 2;
@@ -288,7 +251,7 @@ function drawSprite(sprite, hits, pixels) {
                 const color = globals.palette[p];
 
                 for (let x = tx; (x < tx + s1) && (x < w); ++x) {
-                    if (hits[x].distance < sprite.distance) {
+                    if (hits[x].distance < distance) {
                         continue;
                     }
 
@@ -722,7 +685,7 @@ function init3d() {
 
 function getHeight(distance) {
     // TODO: scale based on 3D canvas aspect ratio
-    const scale = globals.size * 318.5;
+    const scale = globals.size * globals.canvas3d.width / (2 * globals.fov);
     return Math.round(scale / distance) * 2;
 }
 
@@ -880,23 +843,10 @@ function updateTexture(gl3d) {
         }
     }
 
-    // let debug = document.getElementById("debug");
-    // debug.innerText = "";
-
-    // for (const sprite of sprites) {
-    //     debug.innerText += " " + sprite.distance;
-    // }
-
-    // sort the sprites per distance
+    // sort the sprites based on camera distance
     sprites.sort((a, b) => { return b.distance - a.distance; });
 
-    // debug.innerText += "\n";
-    // for (const sprite of sprites) {
-    //     debug.innerText += " " + sprite.distance;
-    // }
-
     globals.sprites = [];
-
 
     // draw sprites
     for (const sprite of sprites) {
@@ -905,9 +855,7 @@ function updateTexture(gl3d) {
 
         globals.sprites.push(sprite);
 
-        // debug.innerText += "\n x: " + sprite.x + " y: " + sprite.y + " d:" + sprite.distance;
-
-        // break;
+        break;
     }
 
     // write texture
@@ -1865,17 +1813,6 @@ function draw2dScene(gl, programInfo, buffers) {
     // cell point size
     const pointSize = Math.max(1, (globals.size / globals.w) * globals.canvas2d.width - 1);
 
-    // draw walls
-    {
-        const fragColor = [0.0, 0.0, 1.0, 1.0];
-        draw2dElement(gl, buffers.walls, programInfo, fragColor, pointSize, gl.POINTS);
-    }
-
-    // draw doors
-    {
-        const fragColor = [0.0, 1.0, 1.0, 1.0];
-        draw2dElement(gl, buffers.doors, programInfo, fragColor, pointSize, gl.POINTS);
-    }
 
     // draw empty cells
     {
@@ -1905,6 +1842,18 @@ function draw2dScene(gl, programInfo, buffers) {
         gl.deleteBuffer(buffer.buffer);
     }
 
+    // draw walls
+    {
+        const fragColor = [0.0, 0.0, 1.0, 1.0];
+        draw2dElement(gl, buffers.walls, programInfo, fragColor, pointSize, gl.POINTS);
+    }
+
+    // draw doors
+    {
+        const fragColor = [0.0, 1.0, 1.0, 1.0];
+        draw2dElement(gl, buffers.doors, programInfo, fragColor, pointSize, gl.POINTS);
+    }
+
     // draw rays
     {
         const fragColor = [1.0, 0.0, 1.0, 1.0];
@@ -1926,7 +1875,7 @@ function draw2dScene(gl, programInfo, buffers) {
         draw2dElement(gl, buffers.player, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
-    // draw sprite
+    // draw sprites
     {
         let vertices = [];
 
@@ -1942,7 +1891,7 @@ function draw2dScene(gl, programInfo, buffers) {
         };
 
         const fragColor = [0.0, 1.0, 0.0, 1.0];
-        const pointSize = 5;
+        const pointSize = 2;
         draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
 
         gl.deleteBuffer(buffer.buffer);
