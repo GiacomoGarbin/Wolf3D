@@ -968,38 +968,52 @@ function processInput(dt) {
     let [px, py] = translate([globals.x, globals.y], [-dx, -dy]);
     [px, py] = rotate([px, py], -globals.angle);
 
+    // steps
+    let sx = 0;
+    let sy = 0;
+
     // move forward
     if (globals.keys[KEY_W]) {
-        px = px + step;
+        sx = +step;
     }
 
     // strafe left
     if (globals.keys[KEY_LEFT]) {
-        py = py - step;
+        sy = -step;
     }
 
     // move backward
     if (globals.keys[KEY_S]) {
-        px = px - step;
+        sx = -step;
     }
 
     // strafe right
     if (globals.keys[KEY_RIGHT]) {
-        py = py + step;
+        sy = +step;
     }
+
+    px += sx;
+    py += sy;
+
+    // collision offset
+    const offset = globals.size * 0.25;
+    let tx = px + offset * Math.sign(sx);
+    let ty = py + offset * Math.sign(sy);
 
     // player space -> screen space
     [px, py] = rotate([px, py], globals.angle);
     [px, py] = translate([px, py], [dx, dy]);
+    [tx, ty] = rotate([tx, ty], globals.angle);
+    [tx, ty] = translate([tx, ty], [dx, dy]);
 
     // check wall collision
-    if (!getCell(px, globals.y).isWall()) {
+    if (!getCell(tx, globals.y).isWall()) {
         // apply translation
         globals.x = px;
     }
 
     // check wall collision
-    if (!getCell(globals.x, py).isWall()) {
+    if (!getCell(globals.x, ty).isWall()) {
         // apply translation
         globals.y = py;
     }
