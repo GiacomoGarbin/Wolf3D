@@ -13,9 +13,9 @@ let globals = {
     loaders: [], // files to load
     canvas2d: null, // top-down debug view
     canvas3d: null, // 3D view
-    x: 0,       // player position x
-    y: 0,       // player position y
-    angle: 0.0, // player direction
+    x: undefined,     // player position x
+    y: undefined,     // player position y
+    angle: undefined, // player direction
     grid: [], // level map grid
     rows: 0,  // grid rows
     cols: 0,  // grid cols
@@ -27,6 +27,7 @@ let globals = {
     offsets: null,
     assets: null, // VSWAP.WL6
     levels: [],
+    level: 0, // current level index
     activeDoors: [],
     visibles: new Set(), // visible cells
     sprites: [],
@@ -485,25 +486,42 @@ function main() {
     let gl3d = init3d();
 
     // init player position and direction
-    // TODO: read player spawn position from level.plane[1]
 
-    const level = globals.levels[0];
+    const level = globals.levels[globals.level];
     const plane = level.planes[1];
 
-    for (let x = 0; x < globals.cols; ++x) {
-        for (let y = 0; y < globals.rows; ++y) {
-            const i = y * globals.cols + x;
+    for (let row = 0; row < globals.rows; row++) {
+        for (let col = 0; col < globals.cols; col++) {
+            const i = row * globals.cols + col;
             const v = plane.getUint16(i * 2, true);
             if ((19 <= v) && (v <= 22)) {
-                globals.x = x;
-                globals.y = y;
+                // set position
+                globals.x = (col + 0.5) * globals.size;
+                globals.y = (row + 0.5) * globals.size;
+                // set angle
+                switch (v) {
+                    case 19:
+                        globals.angle = 3 * HalfPI;
+                        break;
+                    case 20:
+                        globals.angle = 0;
+                        break;
+                    case 21:
+                        globals.angle = HalfPI;
+                        break;
+                    case 22:
+                        globals.angle = Math.PI;
+                        break;
+                }
+                break;
             }
+        }
+        if ((globals.x != undefined) && (globals.y != undefined)) {
+            break;
         }
     }
 
-    globals.x = 28 * globals.size + (globals.size / 2);
-    globals.y = 57 * globals.size + (globals.size / 2);
-    globals.angle = 0;
+    console.assert((globals.x != undefined) && (globals.y != undefined) && (globals.angle != undefined));
 
     // bind keyboard events
     document.onkeydown = shortcuts;
@@ -811,7 +829,7 @@ function updateTexture(gl3d) {
     // draw sprites
 
     // level we are displaying
-    const level = globals.levels[0];
+    const level = globals.levels[globals.level];
     const plane = level.planes[1];
     console.assert((plane.byteLength / 2) == (64 * 64));
 
@@ -1074,7 +1092,7 @@ function initBuffers2dView(gl) {
     globals.h = globals.rows * globals.size;
 
     // level we are displaying
-    const level = globals.levels[0];
+    const level = globals.levels[globals.level];
     const plane = level.planes[0];
     console.assert((plane.byteLength / 2) == (64 * 64));
 
