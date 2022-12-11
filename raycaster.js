@@ -115,12 +115,16 @@ class Door extends Cell {
         this.progress = progress;
     }
 
-    isOpen() {
-        return this.status == DS_OPEN;
+    isClosed() {
+        return this.status == DS_CLOSED;
     }
 
-    isClosed() {
-        return !this.isOpen();
+    isOpening() {
+        return this.status == DS_OPENING;
+    }
+
+    isOpen() {
+        return this.status == DS_OPEN;
     }
 };
 
@@ -1086,7 +1090,7 @@ function processInput(dt) {
 
         if (cell.isWall()) {
             // block
-        } else if (cell.isDoor() && cell.isClosed()) {
+        } else if (cell.isDoor() && !cell.isOpen()) {
             // block
         } else {
             // apply translation
@@ -1100,7 +1104,7 @@ function processInput(dt) {
 
         if (cell.isWall()) {
             // block
-        } else if (cell.isDoor() && cell.isClosed()) {
+        } else if (cell.isDoor() && !cell.isOpen()) {
             // block
         } else {
             // apply translation
@@ -1150,7 +1154,7 @@ function processInput(dt) {
 
             let cell = getCell(px, py);
 
-            if (cell.isDoor()) {
+            if (cell.isDoor() && cell.isClosed()) {
                 cell.setStatus(DS_OPENING);
                 globals.activeDoors.push(cell);
             }
@@ -2008,7 +2012,7 @@ function draw2dScene(gl, programInfo, buffers) {
         const g = Math.round(112 * 1.5) / 255;
         const b = Math.round(114 * 1.5) / 255;
         const fragColor = [r, g, b, 1.0];
-        draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
+        // draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
 
         gl.deleteBuffer(buffer.buffer);
     }
