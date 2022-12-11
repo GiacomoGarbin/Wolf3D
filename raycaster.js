@@ -31,6 +31,7 @@ let globals = {
     activeDoors: [],
     visibles: new Set(), // visible cells
     sprites: [],
+    entities: [],
     fov: HalfPI / 2, // field of view
     keys: {
         KEY_SHIFT: false,
@@ -51,6 +52,7 @@ const CT_DOOR = 2;
 class Cell {
     constructor(textureIndex) {
         this.textureIndex = textureIndex;
+        this.entities = []; // should contain references
     }
 
     getType() {
@@ -121,6 +123,25 @@ class Door extends Cell {
         return !this.isOpen();
     }
 };
+
+// any "entity" (enemies, collectables, probs) in the map 
+
+class Entity { // TODO: should be abstract
+    constructor(x, y, index, orientable, blocking, collectable) {
+        this.x = x;
+        this.y = y;
+        this.index = index; // base texture index
+        this.orientable = orientable;
+        this.blocking = blocking;
+        this.collectable = collectable;
+    }
+};
+
+// Entity subclasses
+// * Enemy
+//   * Guard
+//   * Dog
+// * Treasure ? 
 
 const CHUNKS = 663;
 const WALLS = 106;
@@ -1177,8 +1198,10 @@ function initBuffers2dView(gl) {
 
     // level we are displaying
     const level = globals.levels[globals.level];
-    const plane = level.planes[0];
-    console.assert((plane.byteLength / 2) == (64 * 64));
+    const plane0 = level.planes[0];
+    const plane1 = level.planes[1];
+    console.assert((plane0.byteLength / 2) == (64 * 64));
+    console.assert((plane1.byteLength / 2) == (64 * 64));
 
     const half = globals.size / 2;
 
@@ -1189,22 +1212,58 @@ function initBuffers2dView(gl) {
     for (let row = 0; row < globals.rows; row++) {
         for (let col = 0; col < globals.cols; col++) {
             const i = row * globals.cols + col;
-            const tex = plane.getUint16(i * 2, true);
+            const i0 = plane0.getUint16(i * 2, true);
+            // TODO: assert i0
 
             let cell = undefined;
 
             const x = col * globals.size + half;
             const y = row * globals.size + half;
 
-            if (tex <= 63) { // walls
-                cell = new Wall(tex);
+            if (i0 <= 63) { // walls
+                cell = new Wall(i0);
                 walls.push(x, y);
-            } else if (tex <= 101) { // doors
-                cell = new Door(tex);
+            } else if (i0 <= 101) { // doors
+                cell = new Door(i0);
                 doors.push(x, y);
             } else { // empty cells
-                cell = new Cell(tex);
+                cell = new Cell(i0);
                 empty.push(x, y);
+            }
+
+            const i1 = plane1.getUint16(i * 2, true);
+            // TODO: assert i1
+
+            let entity = undefined;
+
+            if (i1 == 0) {
+                // empty
+            } else if ((19 <= i1) && (i1 <= 22)) {
+                // player init position and direction
+            } else if ((23 <= i1) && (i1 <= 70)) { // probs
+                // TODO: collectible
+                // TODO: blocking
+                entity = new Entity(x, y, i1 - 21, false, false, false);
+            } else if (i1 == 124) { // dead guard
+                entity = new Entity(x, y, 95, false, false, false);
+            } else if (i1 >= 108) { // enemies
+                if ((108 <= i1) && (i1 < 116)) { // guard
+                    entity = new Entity(x, y, 50, true, false, false);
+                } else if ((144 <= i1) && (i1 < 152)) { // guard
+                    entity = new Entity(x, y, 50, true, false, false);
+                } else if ((134 <= i1) && (i1 < 142)) { // dog
+                    entity = new Entity(x, y, 99, true, false, false);
+                } else if ((170 <= i1) && (i1 < 178)) { // dog
+                    entity = new Entity(x, y, 99, true, false, false);
+                }
+            } else {
+                // TODO: unimplemented
+                entity = new Entity(x, y, undefined, false, false, false);
+            }
+
+            if (entity != undefined) {
+                globals.entities.push(entity);
+                cell.entities.push(globals.entities.length - 1);
             }
 
             globals.grid.push(cell);
@@ -1907,24 +1966,30 @@ function draw2dElement(gl, buffer, programInfo, fragColor, pointSize, mode) {
 }
 
 function draw2dScene(gl, programInfo, buffers) {
-    const rgb = (127 - 32 - 16) / 255;
-    gl.clearColor(rgb, rgb, rgb, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
     gl.useProgram(programInfo.program);
+
+    // clear
+    {
+        const r = 47 / 255;
+        const g = 46 / 255;
+        const b = 48 / 255;
+        gl.clearColor(r, g, b, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+    }
 
     // cell point size
     const pointSize = Math.max(1, (globals.size / globals.w) * globals.canvas2d.width - 1);
 
-
     // draw empty cells
     {
-        const rgb = (127 + 32 - 16) / 255;
-        const fragColor = [rgb, rgb, rgb, 1.0];
+        const r = 114 / 255;
+        const g = 112 / 255;
+        const b = 114 / 255;
+        const fragColor = [r, g, b, 1.0];
         draw2dElement(gl, buffers.empty, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
-    // draw visible cells (right now cells visited by the raycaster) 
+    // draw visible cells (right now all cells visited by the raycaster) 
     {
         let vertices = [];
 
@@ -1939,7 +2004,10 @@ function draw2dScene(gl, programInfo, buffers) {
             count: vertices.length / 2,
         };
 
-        const fragColor = [1.0, 0.0, 0.0, 1.0];
+        const r = Math.round(114 * 1.5) / 255;
+        const g = Math.round(112 * 1.5) / 255;
+        const b = Math.round(114 * 1.5) / 255;
+        const fragColor = [r, g, b, 1.0];
         draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
 
         gl.deleteBuffer(buffer.buffer);
@@ -1978,25 +2046,43 @@ function draw2dScene(gl, programInfo, buffers) {
         draw2dElement(gl, buffers.player, programInfo, fragColor, pointSize, gl.POINTS);
     }
 
-    // draw sprites
+    // draw entities
     {
         let vertices = [];
+        let buffer = { buffer: null, count: 0 };
 
-        for (const sprite of globals.sprites) {
-            const x = sprite.x;
-            const y = sprite.y;
-            vertices.push(x, y);
+        for (const entity of globals.entities) {
+            if (entity.index != undefined) {
+                vertices.push(entity.x, entity.y);
+            }
         }
 
-        const buffer = {
+        buffer = {
             buffer: createBuffer(gl, vertices),
             count: vertices.length / 2,
         };
 
-        const fragColor = [0.0, 1.0, 0.0, 1.0];
-        const pointSize = 2;
+        let fragColor = [0.0, 1.0, 0.0, 1.0];
+        let pointSize = 2;
         draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
+        gl.deleteBuffer(buffer.buffer);
 
+        vertices = [];
+
+        for (const entity of globals.entities) {
+            if (entity.index == undefined) {
+                vertices.push(entity.x, entity.y);
+            }
+        }
+
+        buffer = {
+            buffer: createBuffer(gl, vertices),
+            count: vertices.length / 2,
+        };
+
+        fragColor = [1.0, 0.0, 0.0, 1.0];
+        pointSize = 3;
+        draw2dElement(gl, buffer, programInfo, fragColor, pointSize, gl.POINTS);
         gl.deleteBuffer(buffer.buffer);
     }
 }
