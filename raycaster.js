@@ -860,10 +860,14 @@ function updateTexture(gl3d) {
         } else if (i == 124) { // dead guard
             j = 95;
         } else if (i >= 108) { // enemies
-            if ((108 <= i) && (i < 116)) {
-                j = getGuardTextureIndex(x, y, i - 108);
-            } else if ((144 <= i) && (i < 152)) {
-                j = getGuardTextureIndex(x, y, i - 144);
+            if ((108 <= i) && (i < 116)) { // guard
+                j = getSpriteTextureIndex(x, y, 50, i - 108);
+            } else if ((144 <= i) && (i < 152)) { // guard
+                j = getSpriteTextureIndex(x, y, 50, i - 144);
+            } else if ((134 <= i) && (i < 142)) { // dog
+                j = getSpriteTextureIndex(x, y, 99, i - 134);
+            } else if ((170 <= i) && (i < 178)) { // dog
+                j = getSpriteTextureIndex(x, y, 99, i - 170);
             }
         }
 
@@ -918,7 +922,7 @@ function updateTexture(gl3d) {
     }
 }
 
-function getGuardTextureIndex(x, y, offset) {
+function getSpriteTextureIndex(x, y, index, offset) {
     const dx = x - globals.x;
     const dy = y - globals.y;
 
@@ -948,7 +952,7 @@ function getGuardTextureIndex(x, y, offset) {
         a += 2 * Math.PI;
     }
 
-    return 50 + (7 - Math.floor(a / (Math.PI / 4)));
+    return index + (7 - Math.floor(a / (Math.PI / 4)));
 }
 
 function shortcuts(event) {
