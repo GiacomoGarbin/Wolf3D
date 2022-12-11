@@ -845,28 +845,36 @@ function updateTexture(gl3d) {
     let sprites = [];
 
     for (let visible of globals.visibles) {
-        let i = plane.getUint16(visible * 2, true);
+        const i = plane.getUint16(visible * 2, true);
         // TODO: assert i
 
-        if ((23 <= i) && (i <= 70)) {
-            i -= 21;
-        } else if (i == 124) {
-            i = 95;
-        } else {
-            i = undefined;
+        const x = (visible % globals.size) * globals.size + 32;
+        const y = Math.floor(visible / globals.size) * globals.size + 32;
+
+        let j = undefined;
+
+        if ((23 <= i) && (i <= 70)) { // probs
+            // TODO: collectible
+            // TODO: blocking
+            j = i - 21;
+        } else if (i == 124) { // dead guard
+            j = 95;
+        } else if (i >= 108) { // enemies
+            if ((108 <= i) && (i < 116)) {
+                j = getGuardTextureIndex(x, y, i - 108);
+            } else if ((144 <= i) && (i < 152)) {
+                j = getGuardTextureIndex(x, y, i - 144);
+            }
         }
 
-        if (i != undefined) {
-            const x = (visible % globals.size) * globals.size + 32;
-            const y = Math.floor(visible / globals.size) * globals.size + 32;
-
+        if (j != undefined) {
             const d = distance(x, y);
             if ((d == Infinity) || (d <= 0.0)) {
                 continue;
             }
 
             const sprite = {
-                textureIndex: i,
+                textureIndex: j,
                 x: x,
                 y: y,
                 distance: d,
@@ -908,6 +916,39 @@ function updateTexture(gl3d) {
             pixels
         );
     }
+}
+
+function getGuardTextureIndex(x, y, offset) {
+    const dx = x - globals.x;
+    const dy = y - globals.y;
+
+    // (-PI, +PI) -> (0, 2*PI)
+    let a = Math.PI + Math.atan2(dy, dx);
+
+    const direction = offset % 4;
+    switch (direction) {
+        case 0: // up
+            a -= 3 * HalfPI;
+            break;
+        case 1: // right
+            a -= 0;
+            break;
+        case 2: // down
+            a -= HalfPI;
+            break;
+        case 3: // left
+            a -= Math.PI;
+            break;
+    }
+
+    // center at PI/8
+    a -= (Math.PI / 8);
+
+    if (a < 0) {
+        a += 2 * Math.PI;
+    }
+
+    return 50 + (7 - Math.floor(a / (Math.PI / 4)));
 }
 
 function shortcuts(event) {
