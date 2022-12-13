@@ -28,7 +28,7 @@ let globals = {
     assets: null, // VSWAP.WL6
     levels: [],
     level: 0, // current level index
-    activeDoors: [],
+    activeCells: [],
     visibles: new Set(), // visible cells
     sprites: [],
     entities: [],
@@ -48,11 +48,16 @@ let globals = {
 const CT_CELL = 0; // base class represents empty cells
 const CT_WALL = 1;
 const CT_DOOR = 2;
+const CT_PUSH = 3; // push walls
 
 class Cell {
-    constructor(textureIndex) {
+    constructor(row, col, textureIndex) {
+        this.row = row;
+        this.col = col;
+        this.x = col * globals.size;
+        this.y = row * globals.size;
         this.textureIndex = textureIndex;
-        this.entities = []; // should contain references
+        this.entities = []; // index of globals.entities
     }
 
     getType() {
@@ -60,11 +65,19 @@ class Cell {
     }
 
     isWall() {
-        return this.getType() == CT_WALL;
+        return this.getType() == CT_WALL; // or isPushWall()
     }
 
     isDoor() {
         return this.getType() == CT_DOOR;
+    }
+
+    isPushWall() {
+        return this.getType() == CT_PUSH;
+    }
+
+    isWalkable() {
+        return (106 <= this.textureIndex) && (this.textureIndex <= 143);
     }
 
     getTextureIndex() {
@@ -73,12 +86,22 @@ class Cell {
 };
 
 class Wall extends Cell {
-    constructor(textureIndex) {
-        super(textureIndex);
+    constructor(row, col, textureIndex) {
+        super(row, col, textureIndex);
+
+        this.bIsPushable = false;
     }
 
     getType() {
         return CT_WALL;
+    }
+
+    setIsPushable(b) {
+        this.bIsPushable = b;
+    }
+
+    getIsPushable() {
+        return this.bIsPushable;
     }
 };
 
@@ -88,8 +111,8 @@ const DS_OPENING = 1;
 const DS_OPEN = 2;
 
 class Door extends Cell {
-    constructor(textureIndex) {
-        super(textureIndex);
+    constructor(row, col, textureIndex) {
+        super(row, col, textureIndex);
 
         this.status = DS_CLOSED;
         this.progress = 0; // [0,1] = [completely closed, fully open]
@@ -125,6 +148,73 @@ class Door extends Cell {
 
     isOpen() {
         return this.status == DS_OPEN;
+    }
+};
+
+// push wall status
+const PW_READY = 0;
+const PW_MOVING = 1;
+const PW_MOVED = 2;
+
+class PushWall extends Wall {
+    constructor(row, col, textureIndex) {
+        super(row, col, textureIndex);
+
+        this.status = PW_READY;
+        this.progress = 0; // [0,1]
+
+        // the push wall moves backward until it hits another wall or completes the steps
+        this.steps = 0; // how many cell should move? possibly always 2
+        this.dir = undefined;
+        this.target = undefined; // target cell
+    }
+
+    getType() {
+        return CT_PUSH;
+    }
+
+    getStatus() {
+        return this.status;
+    }
+
+    setStatus(status) {
+        this.status = status;
+    }
+
+    getProgress() {
+        return this.progress;
+    }
+
+    setProgress(progress) {
+        this.progress = progress;
+    }
+
+    getMoveDir() {
+        return this.dir;
+    }
+
+    setMoveDir(dir) {
+        this.dir = dir;
+    }
+
+    getTargetCell() {
+        return this.target;
+    }
+
+    setTargetCell(target) {
+        this.target = target;
+    }
+
+    isReady() {
+        return this.status == PW_READY;
+    }
+
+    isMoving() {
+        return this.status == PW_MOVING;
+    }
+
+    hasMoved() {
+        return this.status == PW_MOVED;
     }
 };
 
@@ -555,6 +645,10 @@ function main() {
         }
     }
 
+    // globals.x = (32 + 0.5) * globals.size;
+    // globals.y = (22 + 0.5) * globals.size;
+    // globals.angle = Math.PI;
+
     console.assert((globals.x != undefined) && (globals.y != undefined) && (globals.angle != undefined));
 
     // bind keyboard events
@@ -585,7 +679,7 @@ function main() {
             // draw2dScene(gl2d.gl, gl2d.programInfo, gl2d.buffers);
         }
 
-        updateDoors(dt);
+        updateActiveCells(dt, gl2d);
 
         updateTexture(gl3d);
         draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
@@ -600,27 +694,139 @@ function main() {
     requestAnimationFrame(render);
 }
 
-function updateDoors(dt) {
-    // loop through active doors
-    for (let i = globals.activeDoors.length - 1; i >= 0; --i) {
-        let door = globals.activeDoors[i];
+// loop through active cells and update their status
+function updateActiveCells(dt, gl2d) {
+    for (let i = globals.activeCells.length - 1; i >= 0; --i) {
+        let cell = globals.activeCells[i];
 
-        switch (door.getStatus()) {
-            case DS_CLOSED:
-                console.assert(false);
-                break;
-            case DS_OPENING:
-                const progress = door.getProgress();
-                if (progress < 1) {
-                    door.setProgress(Math.min(progress + dt * 0.001, 1));
-                    // console.log(door.getProgress());
-                } else {
-                    door.setStatus(DS_OPEN);
-                }
-                break;
-            case DS_OPEN:
-                globals.activeDoors.splice(i, 1); // remove item
-                break;
+        if (cell.isDoor()) {
+            switch (cell.getStatus()) {
+                case DS_CLOSED:
+                    console.assert(false);
+                    break;
+                case DS_OPENING:
+                    const progress = cell.getProgress();
+                    if (progress < 1) {
+                        cell.setProgress(Math.min(progress + dt * 0.001, 1));
+                    } else {
+                        cell.setStatus(DS_OPEN);
+                    }
+                    break;
+                case DS_OPEN:
+                    // remove cell from active list
+                    globals.activeCells.splice(i, 1);
+                    break;
+            }
+        } else if (cell.isPushWall()) {
+            switch (cell.getStatus()) {
+                case PW_READY:
+                    console.assert(false);
+                    break;
+                case PW_MOVING:
+                    const progress = cell.getProgress();
+                    if (progress < 1) {
+                        cell.setProgress(Math.min(progress + dt * 0.001, 1));
+                    } else {
+                        const target = cell.getTargetCell();
+                        let j = undefined;
+
+                        switch (cell.getMoveDir()) {
+                            case CD_DOWN:
+                                if ((target.row + 1) < globals.rows) {
+                                    j = (target.row + 1) * globals.cols + target.col;
+                                }
+                                break;
+                            case CD_LEFT:
+                                if ((target.col - 1) >= 0) {
+                                    j = target.row * globals.cols + (target.col - 1);
+                                }
+                                break;
+                            case CD_RIGHT:
+                                if ((target.col + 1) < globals.cols) {
+                                    j = target.row * globals.cols + (target.col + 1);
+                                }
+                                break;
+                            case CD_UP:
+                                if ((target.row - 1) >= 0) {
+                                    j = (target.row - 1) * globals.cols + target.col;
+                                }
+                                break;
+                        }
+
+                        // next target
+                        const dst = (j == undefined) ? undefined : globals.grid[j];
+
+                        let wall = undefined;
+
+                        if ((dst == undefined) || !dst.isWalkable()) {
+                            wall = new Wall(target.row, target.col, cell.textureIndex);
+                            // globals.activeCells.splice(i, 1);
+                            // cell.setStatus(PW_MOVED);
+                        } else {
+                            wall = new PushWall(target.row, target.col, cell.textureIndex);
+                            wall.setStatus(PW_MOVING);
+                            wall.setMoveDir(cell.getMoveDir());
+                            wall.setTargetCell(dst);
+                        }
+
+                        wall.entities = target.entities;
+
+                        let empty = new Cell(cell.row, cell.col, target.textureIndex);
+                        empty.entities = cell.entities;
+
+                        const k = cell.row * globals.cols + cell.col;
+                        const t = target.row * globals.cols + target.col;
+
+                        // replace dst
+                        globals.grid[t] = wall;
+
+                        // replace src
+                        globals.grid[k] = empty;
+
+                        if ((dst == undefined) || !dst.isWalkable()) {
+                            globals.activeCells.splice(i, 1);
+                        } else {
+                            globals.activeCells.splice(i, 1, globals.grid[t]);
+                        }
+
+                        // rebuild debug 2D view buffers
+                        {
+                            let walls = [];
+                            let empty = [];
+
+                            const half = globals.size / 2;
+
+                            for (let row = 0; row < globals.rows; ++row) {
+                                for (let col = 0; col < globals.cols; ++col) {
+                                    const index = row * globals.cols + col;
+                                    const cell = globals.grid[index];
+                                    switch (cell.getType()) {
+                                        case CT_WALL:
+                                        case CT_PUSH:
+                                            walls.push(cell.x + half, cell.y + half);
+                                            break;
+                                        case CT_CELL:
+                                            empty.push(cell.x + half, cell.y + half);
+                                            break;
+                                    }
+                                }
+                            }
+
+                            gl2d.gl.deleteBuffer(gl2d.buffers.walls.buffer);
+                            gl2d.buffers.walls.buffer = createBuffer(gl2d.gl, walls);
+                            gl2d.buffers.walls.count = walls.length / 2;
+
+                            gl2d.gl.deleteBuffer(gl2d.buffers.empty.buffer);
+                            gl2d.buffers.empty.buffer = createBuffer(gl2d.gl, empty);
+                            gl2d.buffers.empty.count = empty.length / 2;
+                        }
+                    }
+                    break;
+                case PW_MOVED: // TODO: not used
+                    // remove cell from active list
+                    globals.activeCells.splice(i, 1);
+                    break;
+            }
         }
     }
 }
@@ -1010,6 +1216,11 @@ function dot(a, b) {
     return a.map((e, i) => a[i] * b[i]).reduce((t, v) => t + v, 0);
 }
 
+function cross(a, b) {
+    console.assert((a.length == 2) && (b.length == 2));
+    return a[0] * b[1] - a[1] * b[0];
+}
+
 function translate(vertex, offset) {
     console.assert(vertex.length == offset.length);
     return vertex.map((e, i) => vertex[i] + offset[i]);
@@ -1019,6 +1230,67 @@ function rotate(vertex, angle) {
     const row0 = [Math.cos(angle), -Math.sin(angle)];
     const row1 = [Math.sin(angle), Math.cos(angle)];
     return [dot(row0, vertex), dot(row1, vertex)]
+}
+
+function intersectSegments(p, r, q, s) {
+    const qmp = [q[0] - p[0], q[1] - p[1]];
+    const qmpxs = cross(qmp, s);
+    const qmpxr = cross(qmp, r);
+    const rxs = cross(r, s);
+
+    if ((rxs == 0) && (qmpxr == 0)) { // collinear
+        console.assert(false);
+    }
+
+    if ((rxs == 0) && (qmpxr != 0)) { // parallel and non-intersecting
+        return Infinity;
+    }
+
+    // t = (q − p) x s / (r x s)
+    const t = qmpxs / rxs;
+    // u = (q − p) x r / (r x s)
+    const u = qmpxr / rxs;
+
+    if ((rxs != 0) && ((0 <= t) && (t <= 1)) && ((0 <= u) && (u <= 1))) { // intersecting
+        return t;
+    } else { // not-parallel but not-intersecting
+        return Infinity;
+    }
+}
+
+// cardinal directions
+const CD_UP = 0;
+const CD_RIGHT = 1;
+const CD_DOWN = 2;
+const CD_LEFT = 3;
+
+function getTargetCell(cell, dir) {
+    let j = undefined;
+
+    switch (dir) {
+        case CD_DOWN:
+            if ((cell.row + 1) < globals.rows) {
+                j = (cell.row + 1) * globals.cols + cell.col;
+            }
+            break;
+        case CD_LEFT:
+            if ((cell.col - 1) >= 0) {
+                j = cell.row * globals.cols + (cell.col - 1);
+            }
+            break;
+        case CD_RIGHT:
+            if ((cell.col + 1) < globals.cols) {
+                j = cell.row * globals.cols + (cell.col + 1);
+            }
+            break;
+        case CD_UP:
+            if ((cell.row - 1) >= 0) {
+                j = (cell.row - 1) * globals.cols + cell.col;
+            }
+            break;
+    }
+
+    return (j == undefined) ? undefined : globals.grid[j];
 }
 
 function processInput(dt) {
@@ -1084,11 +1356,11 @@ function processInput(dt) {
     [tx, ty] = rotate([tx, ty], globals.angle);
     [tx, ty] = translate([tx, ty], [dx, dy]);
 
-    // check wall and (closed) door collision
+    // check wall, push walls and (closed) door collision
     {
         const cell = getCell(tx, globals.y);
 
-        if (cell.isWall()) {
+        if (cell.isWall() || cell.isPushWall()) {
             // block
         } else if (cell.isDoor() && !cell.isOpen()) {
             // block
@@ -1098,11 +1370,11 @@ function processInput(dt) {
         }
     }
 
-    // check wall and (closed) door collision
+    // check wall, push walls and (closed) door collision
     {
         const cell = getCell(globals.x, ty);
 
-        if (cell.isWall()) {
+        if (cell.isWall() || cell.isPushWall()) {
             // block
         } else if (cell.isDoor() && !cell.isOpen()) {
             // block
@@ -1149,14 +1421,70 @@ function processInput(dt) {
             const dy = Math.sin(globals.angle);
 
             const t = 32 + 16;
-            const px = globals.x + t * dx;
-            const py = globals.y + t * dy;
+            const sx = t * dx;
+            const sy = t * dy;
+            const px = globals.x + sx;
+            const py = globals.y + sy;
 
             let cell = getCell(px, py);
 
             if (cell.isDoor() && cell.isClosed()) {
                 cell.setStatus(DS_OPENING);
-                globals.activeDoors.push(cell);
+                globals.activeCells.push(cell);
+            } else if (cell.isPushWall() && cell.isReady()) {
+                // find moving dir
+                const p = [globals.x, globals.y];
+                const r = [sx, sy];
+
+                const q0 = [cell.x, cell.y];
+                const s0 = [globals.size, 0];
+
+                const q1 = [cell.x, cell.y];
+                const s1 = [0, globals.size];
+
+                const q2 = [cell.x + globals.size, cell.y];
+                const s2 = [0, globals.size];
+
+                const q3 = [cell.x, cell.y + globals.size];
+                const s3 = [globals.size, 0];
+
+                // find intersection points with the 4 sides (segments) of the push wall
+                const t0 = intersectSegments(p, r, q0, s0); // up
+                const t1 = intersectSegments(p, r, q1, s1); // left
+                const t2 = intersectSegments(p, r, q2, s2); // right
+                const t3 = intersectSegments(p, r, q3, s3); // down
+
+                // pick the closest intersection point
+                const t = Math.min(t0, t1, t2, t3);
+                console.assert(t != Infinity);
+
+                let dir = undefined;
+
+                switch (t) {
+                    case t0:
+                        dir = CD_DOWN;
+                        break;
+                    case t1:
+                        dir = CD_RIGHT;
+                        break;
+                    case t2:
+                        dir = CD_LEFT;
+                        break;
+                    case t3:
+                        dir = CD_UP;
+                        break;
+                }
+
+                const dst = getTargetCell(cell, dir);
+
+                if ((dst != undefined) && dst.isWalkable()) {
+                    cell.setStatus(PW_MOVING);
+                    cell.setMoveDir(dir);
+                    cell.setTargetCell(dst);
+                    globals.activeCells.push(cell);
+                } else {
+                    // TODO: transform in wall
+                }
             }
         }
     }
@@ -1225,13 +1553,13 @@ function initBuffers2dView(gl) {
             const y = row * globals.size + half;
 
             if (i0 <= 63) { // walls
-                cell = new Wall(i0);
+                cell = new Wall(row, col, i0);
                 walls.push(x, y);
             } else if (i0 <= 101) { // doors
-                cell = new Door(i0);
+                cell = new Door(row, col, i0);
                 doors.push(x, y);
             } else { // empty cells
-                cell = new Cell(i0);
+                cell = new Cell(row, col, i0);
                 empty.push(x, y);
             }
 
@@ -1242,6 +1570,11 @@ function initBuffers2dView(gl) {
 
             if (i1 == 0) {
                 // empty
+            } else if (i1 == 98) { // push wall
+                console.assert(cell.isWall());
+                // cell.setIsPushable(true);
+                delete cell;
+                cell = new PushWall(row, col, i0);
             } else if ((19 <= i1) && (i1 <= 22)) {
                 // player init position and direction
             } else if ((23 <= i1) && (i1 <= 70)) { // probs
@@ -1260,14 +1593,17 @@ function initBuffers2dView(gl) {
                 } else if ((170 <= i1) && (i1 < 178)) { // dog
                     entity = new Entity(x, y, 99, true, false, false);
                 }
-            } else {
-                // TODO: unimplemented
+            } else { // unimplemented
                 entity = new Entity(x, y, undefined, false, false, false);
             }
 
             if (entity != undefined) {
                 globals.entities.push(entity);
                 cell.entities.push(globals.entities.length - 1);
+
+                if (entity.index == undefined) {
+                    console.warn("TODO: unimplemented entity type " + i1);
+                }
             }
 
             globals.grid.push(cell);
@@ -1560,6 +1896,42 @@ function doDoor(cell, px, py, hs, vs, bVerOrHor) {
     }
 }
 
+function doPushWall(cell, px, py, hs, vs, bVerOrHor) {
+    const dx = px + hs * cell.getProgress();
+    const dy = py + vs * cell.getProgress();
+
+    let hit = {
+        distance: Infinity,
+        cell: cell,
+        px: dx,
+        py: dy,
+        bVerOrHor: bVerOrHor,
+        textureIndex: 2 * cell.getTextureIndex() - (bVerOrHor ? 1 : 2),
+    };
+
+    if (bVerOrHor) {
+        const cpy = Math.floor(py / globals.size) * globals.size;
+        const cdy = Math.floor(dy / globals.size) * globals.size;
+
+        const diff = cdy - cpy;
+
+        if (diff != 0) {
+            return null;
+        }
+    } else {
+        const cpx = Math.floor(px / globals.size) * globals.size;
+        const cdx = Math.floor(dx / globals.size) * globals.size;
+
+        const diff = cdx - cpx;
+
+        if (diff != 0) {
+            return null;
+        }
+    }
+
+    return hit;
+}
+
 function markVisible(px, py) {
     const cx = Math.floor(px / globals.size);
     const cy = Math.floor(py / globals.size);
@@ -1593,6 +1965,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
                 if (hit != null) {
                     return hit;
                 }
+            } else if (cell.isPushWall()) {
+                const hit = doPushWall(cell, px, py, hs, vs, bVerOrHor);
+                if (hit != null) {
+                    return hit;
+                }
             }
         }
     }
@@ -1612,6 +1989,11 @@ function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
                 markVisible(px, py);
                 if (cell.isDoor()) {
                     const hit = doDoor(cell, px, py, hs, vs, bVerOrHor);
+                    if (hit != null) {
+                        return hit;
+                    }
+                } else if (cell.isPushWall()) {
+                    const hit = doPushWall(cell, px, py, hs, vs, bVerOrHor);
                     if (hit != null) {
                         return hit;
                     }
