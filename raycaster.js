@@ -6,6 +6,7 @@ const KEY_D = 68;
 const KEY_S = 83;
 const KEY_W = 87;
 const KEY_SPACE = 32;
+const KEY_CTRL = 17;
 
 const HalfPI = Math.PI / 2;
 
@@ -41,6 +42,16 @@ let globals = {
         KEY_D: false,
         KEY_S: false,
         KEY_W: false,
+        KEY_SPACE: false,
+        KEY_CTRL: false,
+    },
+    isSpaceKeyDown: false,
+    isCtrlKeyDown: false,
+    weaponTextureIndex: 421,
+    weaponAnim: {
+        frames: [421, 422, 423, 424, 425, 421],
+        duration: 600, // milliseconds
+        elapsed: 600,
     }
 }
 
@@ -382,7 +393,7 @@ function drawSprite(sprite, hits, pixels) {
                 const color = globals.palette[index];
 
                 for (let x0 = tx; (x0 < (tx + s1)) && (x0 < w); ++x0) {
-                    if (hits[x0].distance < distance) {
+                    if ((x0 < hits.length) && (hits[x0].distance < distance)) {
                         continue;
                     }
 
@@ -645,10 +656,6 @@ function main() {
         }
     }
 
-    // globals.x = (32 + 0.5) * globals.size;
-    // globals.y = (22 + 0.5) * globals.size;
-    // globals.angle = Math.PI;
-
     console.assert((globals.x != undefined) && (globals.y != undefined) && (globals.angle != undefined));
 
     // bind keyboard events
@@ -681,6 +688,8 @@ function main() {
 
         updateActiveCells(dt, gl2d);
 
+        updateWeaponAnimation(dt);
+
         updateTexture(gl3d);
         draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
 
@@ -692,6 +701,18 @@ function main() {
     }
 
     requestAnimationFrame(render);
+}
+
+function updateWeaponAnimation(dt) {
+    if (globals.weaponAnim.elapsed < globals.weaponAnim.duration) {
+        const d = globals.weaponAnim.duration / globals.weaponAnim.frames.length;
+        const i = Math.floor(globals.weaponAnim.elapsed / d);
+        globals.weaponTextureIndex = globals.weaponAnim.frames[i];
+        globals.weaponAnim.elapsed += dt;
+    } else {
+        globals.weaponTextureIndex = 421;
+        globals.weaponAnim.elapsed = globals.weaponAnim.duration;
+    }
 }
 
 // loop through active cells and update their status
@@ -1123,12 +1144,28 @@ function updateTexture(gl3d) {
 
     globals.sprites = [];
 
-    // draw sprites
     for (const sprite of sprites) {
         // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
         drawSprite(sprite, globals.hits, pixels);
         globals.sprites.push(sprite);
     }
+
+    // draw weapon
+    {
+        const d = 64 * 1.25;
+        const x = globals.x + d * Math.cos(globals.angle);
+        const y = globals.y + d * Math.sin(globals.angle);
+
+        const sprite = {
+            textureIndex: globals.weaponTextureIndex,
+            x: x,
+            y: y,
+            distance: d,
+        }
+
+        drawSprite(sprite, [], pixels);
+    }
+
     // write texture
     {
         const level = 0;
@@ -1197,6 +1234,7 @@ function shortcuts(event) {
         case KEY_S:
         case KEY_W:
         case KEY_SPACE:
+        case KEY_CTRL:
             {
                 globals.keys[event.keyCode] = (event.type == "keydown");
                 break;
@@ -1486,6 +1524,17 @@ function processInput(dt) {
                     // TODO: transform in wall
                 }
             }
+        }
+    }
+
+    // press ctrl
+    if (!globals.keys[KEY_CTRL]) {
+        globals.isCtrlKeyDown = false;
+    } else if (globals.keys[KEY_CTRL] && !globals.isCtrlKeyDown) {
+        globals.isCtrlKeyDown = true;
+
+        if (globals.weaponAnim.elapsed == globals.weaponAnim.duration) {
+            globals.weaponAnim.elapsed = 0;
         }
     }
 }
