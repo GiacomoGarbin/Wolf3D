@@ -6,6 +6,7 @@ The application expects to find these original game files in the `data` subfolde
 * GAMEPAL.OBJ
 * MAPHEAD.WL6
 * VSWAP.WL6
+
 `*.WL6` data archives should be provided with any official PC copy of the original game (e.g. [3]), `GAMEPAL.OBJ` can be found in the original game engine repository (see [2]) in the ` WOLFSRC/OBJ/` subfolder.
 
 ## References
