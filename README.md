@@ -1,5 +1,8 @@
 # Wolfenstein 3D Clone [work in progress]
 
+## Video Preview
+https://user-images.githubusercontent.com/50615667/208308705-64c72dab-7d9c-48f0-bec5-53cd56bf30ac.mp4
+
 ## Data Requirements
 The application expects to find these original game files in the `data` subfolder:
 * GAMEMAPS.WL6
