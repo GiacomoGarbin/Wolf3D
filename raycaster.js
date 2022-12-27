@@ -52,7 +52,8 @@ let globals = {
         frames: [421, 422, 423, 424, 425, 421],
         duration: 600, // milliseconds
         elapsed: 600,
-    }
+    },
+    enemies: []
 }
 
 // cell type
@@ -231,6 +232,10 @@ class PushWall extends Wall {
 
 // any "entity" (enemies, collectables, probs) in the map 
 
+// entity type
+const ET_ENTITY = 0;
+const ET_ENEMY = 1;
+
 class Entity { // TODO: should be abstract
     constructor(x, y, index, orientable, blocking, collectable) {
         this.x = x;
@@ -240,13 +245,53 @@ class Entity { // TODO: should be abstract
         this.blocking = blocking;
         this.collectable = collectable;
     }
+
+    GetType() {
+        return ET_ENTITY;
+    }
+
+    IsEnemy() {
+        return this.GetType() == ET_ENEMY;
+    }
 };
 
-// Entity subclasses
-// * Enemy
-//   * Guard
-//   * Dog
-// * Treasure ? 
+class Enemy extends Entity {
+    constructor(x, y, index, offset, deathAnim) {
+        const orientable = true;
+        const blocking = false;
+        const collectable = false;
+        super(x, y, index, orientable, blocking, collectable);
+
+        this.offset = offset;
+        this.bIsAlive = true;
+        // this.life = 1; // [0, 1]
+        this.deathAnim = deathAnim;
+    }
+
+    GetType() {
+        return ET_ENEMY;
+    }
+
+    die() {
+        this.bIsAlive = false;
+    }
+
+    IsAlive() {
+        return this.bIsAlive;
+    }
+};
+
+class Guard extends Enemy {
+    constructor(x, y, offset) {
+        const index = 50;
+        const deathAnim = {
+            frames: [90, 91, 92, 93, 95],
+            duration: 500, // milliseconds
+            elapsed: 0,
+        };
+        super(x, y, index, offset, deathAnim);
+    }
+};
 
 const CHUNKS = 663;
 const WALLS = 106;
@@ -282,6 +327,7 @@ function getWall(i, j) {
     console.assert((0 <= i) && (i < WALLS));
     console.assert((0 <= j) && (j < (64 * 64)));
 
+    // TODO: profile getUint*
     const offset = globals.assets.getUint32(6 + i * 4, true);
     return globals.assets.getUint8(offset + j);
 }
@@ -690,6 +736,8 @@ function main() {
 
         updateWeaponAnimation(dt);
 
+        updateEnemyAnimation(dt);
+
         updateTexture(gl3d);
         draw3dScene(gl3d.gl, gl3d.buffers, gl3d.programInfo, gl3d.texture);
 
@@ -712,6 +760,23 @@ function updateWeaponAnimation(dt) {
     } else {
         globals.weaponTextureIndex = 421;
         globals.weaponAnim.elapsed = globals.weaponAnim.duration;
+    }
+}
+
+function updateEnemyAnimation(dt) {
+    for (let i = globals.enemies.length - 1; i >= 0; --i) {
+        let enemy = globals.enemies[i];
+        let anim = enemy.deathAnim;
+        if (anim.elapsed < anim.duration) {
+            const d = anim.duration / anim.frames.length;
+            const i = Math.floor(anim.elapsed / d);
+            enemy.index = anim.frames[i];
+            anim.elapsed += dt;
+        } else {
+            enemy.index = 95;
+            anim.elapsed = anim.duration;
+            globals.enemies.splice(i, 1);
+        }
     }
 }
 
@@ -1094,34 +1159,50 @@ function updateTexture(gl3d) {
     const plane = level.planes[1];
     console.assert((plane.byteLength / 2) == (64 * 64));
 
-    let sprites = [];
+    // clear sprites
+    globals.sprites = [];
 
     for (let visible of globals.visibles) {
-        const i = plane.getUint16(visible * 2, true);
+        const i = plane.getUint16(visible * 2, true); // get i from globals.grid
         // TODO: assert i
+
+        const cell = globals.grid[visible];
+        console.assert(cell.entities.length <= 1);
 
         const x = (visible % globals.size) * globals.size + 32;
         const y = Math.floor(visible / globals.size) * globals.size + 32;
 
         let j = undefined;
+        let entity = undefined;
 
-        if ((23 <= i) && (i <= 70)) { // probs
-            // TODO: collectible
-            // TODO: blocking
-            j = i - 21;
-        } else if (i == 124) { // dead guard
-            j = 95;
-        } else if (i >= 108) { // enemies
-            if ((108 <= i) && (i < 116)) { // guard
-                j = getSpriteTextureIndex(x, y, 50, i - 108);
-            } else if ((144 <= i) && (i < 152)) { // guard
-                j = getSpriteTextureIndex(x, y, 50, i - 144);
-            } else if ((134 <= i) && (i < 142)) { // dog
-                j = getSpriteTextureIndex(x, y, 99, i - 134);
-            } else if ((170 <= i) && (i < 178)) { // dog
-                j = getSpriteTextureIndex(x, y, 99, i - 170);
+        if (cell.entities.length != 0) {
+            const index = cell.entities[0];
+            entity = globals.entities[index];
+
+            if (entity.orientable && entity.IsEnemy() && entity.IsAlive()) {
+                j = getSpriteTextureIndex(x, y, entity.index, entity.offset);
+            } else {
+                j = entity.index;
             }
         }
+
+        // if ((23 <= i) && (i <= 70)) { // probs
+        //     // TODO: collectible
+        //     // TODO: blocking
+        //     j = i - 21;
+        // } else if (i == 124) { // dead guard
+        //     j = 95;
+        // } else if (i >= 108) { // enemies
+        //     if ((108 <= i) && (i < 116)) { // guard
+        //         j = getSpriteTextureIndex(x, y, 50, i - 108);
+        //     } else if ((144 <= i) && (i < 152)) { // guard
+        //         j = getSpriteTextureIndex(x, y, 50, i - 144);
+        //     } else if ((134 <= i) && (i < 142)) { // dog
+        //         j = getSpriteTextureIndex(x, y, 99, i - 134);
+        //     } else if ((170 <= i) && (i < 178)) { // dog
+        //         j = getSpriteTextureIndex(x, y, 99, i - 170);
+        //     }
+        // }
 
         if (j != undefined) {
             const d = distance(x, y);
@@ -1134,20 +1215,18 @@ function updateTexture(gl3d) {
                 x: x,
                 y: y,
                 distance: d,
+                entity: entity
             }
-            sprites.push(sprite);
+            globals.sprites.push(sprite);
         }
     }
 
     // sort the sprites based on camera distance
-    sprites.sort((a, b) => { return b.distance - a.distance; });
+    globals.sprites.sort((a, b) => { return b.distance - a.distance; });
 
-    globals.sprites = [];
-
-    for (const sprite of sprites) {
+    for (const sprite of globals.sprites) {
         // pass hits so we can read hit distance and check if a sprite column is hidden by a wall column
         drawSprite(sprite, globals.hits, pixels);
-        globals.sprites.push(sprite);
     }
 
     // draw weapon
@@ -1240,7 +1319,14 @@ function shortcuts(event) {
                 break;
             }
         // case 38: // up
+        //     if (event.type == "keyup") {
+        //         globals.index += 1;
+        //     }
+        //     break;
         // case 40: // down
+        //     if (event.type == "keyup") {
+        //         globals.index -= 1;
+        //     }
         //     break;
         default:
             {
@@ -1536,6 +1622,43 @@ function processInput(dt) {
         if (globals.weaponAnim.elapsed == globals.weaponAnim.duration) {
             globals.weaponAnim.elapsed = 0;
         }
+
+        // check if an enemy was hit
+
+        // sort visible enemies based on distance (exploit visible sprites list)
+
+        // for each visible enemy
+        // damage = hit cone / distance -> interpolation
+        // enemy.life -= dagame
+        // if enemy.life <= 0: dead animation
+
+        // is there an hit animation?
+
+        //   E
+        // 0...1...0
+        //  \..|../
+        //   \.|./
+        //    \|/
+        //     P
+
+        // each weapon should have
+        // * max damage value
+        // * hit cone angle
+        // * max hit distance
+        // max damage should be scaled based on
+        // * distance player-enemy
+        // * hit angle 
+
+        for (let i = globals.sprites.length - 1; i >= 0; --i) {
+            const sprite = globals.sprites[i];
+            const entity = sprite.entity;
+
+            if (entity.IsEnemy() && entity.IsAlive()) {
+                entity.die();
+                globals.enemies.push(entity);
+                break;
+            }
+        }
     }
 }
 
@@ -1634,9 +1757,9 @@ function initBuffers2dView(gl) {
                 entity = new Entity(x, y, 95, false, false, false);
             } else if (i1 >= 108) { // enemies
                 if ((108 <= i1) && (i1 < 116)) { // guard
-                    entity = new Entity(x, y, 50, true, false, false);
+                    entity = new Guard(x, y, i1 - 108);
                 } else if ((144 <= i1) && (i1 < 152)) { // guard
-                    entity = new Entity(x, y, 50, true, false, false);
+                    entity = new Guard(x, y, i1 - 144);
                 } else if ((134 <= i1) && (i1 < 142)) { // dog
                     entity = new Entity(x, y, 99, true, false, false);
                 } else if ((170 <= i1) && (i1 < 178)) { // dog
@@ -1989,7 +2112,6 @@ function markVisible(px, py) {
 
     const i = cy * globals.cols + cx;
     globals.visibles.add(i);
-    // globals.visibles.add([px, py]);
 }
 
 function findAxisIntersection(theta, r, p, d, vs, hs, bVerOrHor) {
